@@ -18,7 +18,7 @@
 # Both stages must use the same base (same Python), so keep the two lines in sync.
 
 # ----------------------------------------------------------------- builder ---
-FROM python:3.13-slim@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90 AS builder
+FROM python:3.15-slim@sha256:65a65fc7b30b06cb6df4930fd4650697cb23f4c2698ab81fc87e4b031bc36928 AS builder
 
 ENV PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
@@ -47,7 +47,7 @@ COPY . .
 CMD ["pytest", "-v"]
 
 # ----------------------------------------------------------------- runtime ---
-FROM python:3.13-slim@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90 AS runtime
+FROM python:3.15-slim@sha256:65a65fc7b30b06cb6df4930fd4650697cb23f4c2698ab81fc87e4b031bc36928 AS runtime
 
 # PYTHONDONTWRITEBYTECODE: don't write .pyc files (read-only friendly)
 # PYTHONUNBUFFERED: print logs immediately (no buffering), so `docker logs` is live
