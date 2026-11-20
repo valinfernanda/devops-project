@@ -55,7 +55,7 @@ flowchart LR
 
 ## Roadmap & progress
 
-- [x] **Phase 0: Workstation setup** → [docs/00-setup.md](docs/00-setup.md) ✅ *(only the GitHub push left)*
+- [x] **Phase 0: Workstation setup** → [docs/00-setup.md](docs/00-setup.md) ✅
 - [ ] Phase 1: Application + Docker
 - [ ] Phase 2: CI with GitHub Actions
 - [ ] Phase 3: Kubernetes basics → intermediate + Helm

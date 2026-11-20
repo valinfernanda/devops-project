@@ -4,7 +4,7 @@
 > Docker, a multi-node Kubernetes cluster, Terraform, Helm, and Ansible, with enough free disk space
 > to do so reliably.
 
-**Status:** ✅ almost done. Only 👤 Step 0.5e (create the GitHub repo and push) is left.
+**Status:** ✅ done (20 Nov 2026)
 
 **Legend:** ✅ done · ⏳ not started / waiting · ⚠️ problem found · ⏭️ skipped (not needed) · 👤 **you** must do this step (admin rights or a GUI click)
 
@@ -23,15 +23,14 @@ flowchart TD
     B5 --> B6["0.2f Verify free space ✅"]
     B6 --> C["0.3 Decision: work inside WSL Ubuntu ✅"]
     C --> D["0.4 Install tools in Ubuntu ✅"]
-    D --> E["0.5 Git setup ✅ (name, first commit)<br/>0.5e 👤 create GitHub repo + push ⏳"]
+    D --> E["0.5 Git setup + push to GitHub ✅"]
     E --> F["0.6 Smoke test: first kind cluster ✅"]
     F --> G(["Phase 1: App + Docker"])
 
     classDef done fill:#2e7d32,color:#fff
     classDef wait fill:#f9a825,color:#000
     classDef skip fill:#757575,color:#fff
-    class A,B,B1,B2,B3,B5,B6,C,D,F done
-    class E wait
+    class A,B,B1,B2,B3,B5,B6,C,D,E,F done
     class B4 skip
 ```
 
@@ -631,7 +630,7 @@ author: valinfernanda
 > `core.autocrlf=true` converting line endings **in your working folder only**; the repository
 > stores LF. It's harmless for Markdown, and `.gitattributes` protects `.sh`/`.yaml`/`.tf` files.
 
-### 0.5e 👤 Create the GitHub repository and push ⏳
+### 0.5e 👤 Create the GitHub repository and push ✅
 
 #### 🎯 Objective
 Put the repo on GitHub (`github.com/valinfernanda/devops-project`). Phase 2 (CI with GitHub Actions)
@@ -653,7 +652,29 @@ git remote add origin https://github.com/valinfernanda/devops-project.git   # "o
 git push -u origin main    # -u = remember origin/main as the default upstream, so later just "git push"
 ```
 
-The first push opens a **browser sign-in** (Git Credential Manager). Sign in to GitHub there.
+The first push opens a **browser sign-in** (Git Credential Manager) if you aren't signed in yet.
+On this laptop, credentials were already saved from earlier projects, so no prompt appeared.
+
+#### ✅ Verify
+
+```bash
+git status -sb            # "## main...origin/main" = local main tracks GitHub's main, nothing unpushed
+git ls-remote origin main # the commit GitHub has; must equal your local `git log -1`
+```
+
+#### 📤 Output
+
+```
+## main...origin/main
+905b717d0822dda30e9af59f1cbf1aee577c00b5    refs/heads/main
+```
+
+The repo is live at **<https://github.com/valinfernanda/devops-project>**:
+
+![The devops-project repository on GitHub after the first push](images/00-github-repo.png)
+
+> 💡 Open [`docs/00-setup.md` on GitHub](https://github.com/valinfernanda/devops-project/blob/main/docs/00-setup.md):
+> the Mermaid flowcharts render as real diagrams there, no extension needed.
 
 ---
 
@@ -793,7 +814,7 @@ flowchart LR
 **What you have now**
 - C: back to ~29 GB free; Docker lives on D:.
 - A Linux workstation (WSL Ubuntu) with kubectl 1.37.2, kind 0.33.0, Terraform 1.17.2, Helm 4.3.2, Ansible core 2.17.14, k9s 0.51.0.
-- A Git repo with safety rails (`.gitignore`, `.gitattributes`) and a reproducible install script.
+- A Git repo with safety rails (`.gitignore`, `.gitattributes`) and a reproducible install script, published at <https://github.com/valinfernanda/devops-project>.
 - Proof that you can create a Kubernetes cluster, run a pod, and delete it all in ~2 minutes.
 
 **Concepts you met**
