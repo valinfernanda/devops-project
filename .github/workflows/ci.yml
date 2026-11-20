@@ -1,0 +1,212 @@
+# =============================================================================
+# CI pipeline: runs on every pull request and every push to main.
+#
+#   lint ──────────────┐
+#                      ├──> test ──┐
+#   secrets ───────────┤           ├──> build (image → scan → push on main)
+#   dependency-scan ───┘───────────┘
+#
+# Explained step by step in docs/02-ci.md.
+# =============================================================================
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch: # "Run workflow" button in the Actions tab
+
+# Least privilege: every job gets a READ-ONLY token unless it asks for more.
+permissions:
+  contents: read
+
+# A new push to the same branch/PR cancels the older, still-running pipeline.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/taskapi
+  # Tool images pinned to exact versions (Dependabot can't update these; we bump them by hand).
+  HADOLINT_IMAGE: hadolint/hadolint:v2.15.1
+  GITLEAKS_IMAGE: zricethezav/gitleaks:v8.30.1
+  TRIVY_IMAGE: aquasec/trivy:0.76.2
+  TEST_DB_URL: postgresql+psycopg://test:test@localhost:5432/taskapi_test
+
+jobs:
+  # ---------------------------------------------------------------------------
+  lint:
+    name: Lint (ruff + hadolint)
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.13"
+
+      - name: Install ruff (exact version from the lock file)
+        run: pip install "$(grep -E '^ruff==' requirements-dev.txt)"
+
+      - name: ruff check (lint)
+        run: ruff check --output-format=github .   # annotations appear on the PR's code lines
+
+      - name: ruff format --check
+        run: ruff format --check --diff .
+
+      - name: hadolint (Dockerfile)
+        run: docker run --rm -i "$HADOLINT_IMAGE" < Dockerfile
+
+  # ---------------------------------------------------------------------------
+  secrets:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # full history: a secret deleted later is still leaked in an old commit
+
+      - name: gitleaks (every commit)
+        run: docker run --rm -v "$PWD:/repo" "$GITLEAKS_IMAGE" git /repo --no-banner --redact --verbose
+
+  # ---------------------------------------------------------------------------
+  dependency-scan:
+    name: Dependency scan (Trivy fs)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Trivy (requirements*.txt)
+        run: >-
+          docker run --rm -v "$PWD:/src" "$TRIVY_IMAGE"
+          fs --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 /src/app
+
+  # ---------------------------------------------------------------------------
+  test:
+    name: Tests (unit + integration)
+    needs: lint # fail fast: don't spend minutes on tests if lint already failed
+    runs-on: ubuntu-24.04
+
+    # A real PostgreSQL next to the job, only for this run (like test-db in compose.yaml).
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: taskapi_test
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U test -d taskapi_test"
+          --health-interval 2s --health-timeout 3s --health-retries 15
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Build test image (same Dockerfile, target "test")
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: app
+          target: test
+          tags: taskapi:test
+          load: true # keep the image in the runner's Docker so we can "docker run" it
+          cache-from: type=gha,scope=test
+          cache-to: type=gha,scope=test,mode=max
+
+      - name: Unit tests
+        run: docker run --rm taskapi:test pytest -m "not integration" -v
+
+      - name: Migrate the test database
+        run: docker run --rm --network host -e APP_DATABASE_URL="$TEST_DB_URL" taskapi:test alembic upgrade head
+
+      - name: Integration tests
+        run: docker run --rm --network host -e APP_DATABASE_URL="$TEST_DB_URL" taskapi:test pytest -m integration -v
+
+  # ---------------------------------------------------------------------------
+  build:
+    name: Build, scan & publish image
+    needs: [test, secrets, dependency-scan]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write # push to GitHub Container Registry
+      security-events: write # upload scan results to the repo's Security tab
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Compute image tags and labels
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          tags: |
+            type=sha,prefix=sha-
+            type=ref,event=branch
+            type=ref,event=pr
+
+      - name: Build runtime image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: app
+          target: runtime
+          load: true # build locally first; push only AFTER the scan passes
+          tags: |
+            ${{ steps.meta.outputs.tags }}
+            taskapi:ci
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=runtime
+          cache-to: type=gha,scope=runtime,mode=max
+
+      - name: Trivy image scan (gate) - fail on fixable HIGH/CRITICAL
+        run: >-
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock "$TRIVY_IMAGE"
+          image --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 taskapi:ci
+
+      - name: Trivy SARIF report (for the Security tab)
+        if: always()
+        run: >-
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD:/out" "$TRIVY_IMAGE"
+          image --scanners vuln --severity HIGH,CRITICAL --format sarif --output /out/trivy.sarif taskapi:ci
+
+      - name: Upload SARIF to GitHub code scanning
+        if: always() && hashFiles('trivy.sarif') != ''
+        uses: github/codeql-action/upload-sarif@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
+        with:
+          sarif_file: trivy.sarif
+          category: trivy-image
+
+      - name: Log in to GHCR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }} # automatic, short-lived token; no secret to manage
+
+      - name: Push the scanned image (main only)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: docker push --all-tags "$IMAGE_NAME"
+
+      - name: Job summary
+        if: always()
+        env:
+          # Never paste ${{ }} values straight into a script: tags come from branch
+          # names, which an attacker could choose (script injection). Pass via env.
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          {
+            echo "### Image"
+            echo '```'
+            echo "$TAGS"
+            echo '```'
+            if [ "$GITHUB_EVENT_NAME" = "push" ] && [ "$GITHUB_REF" = "refs/heads/main" ]; then
+              echo "Pushed to GHCR ✅"
+            else
+              echo "Not pushed (only pushes to main publish images)."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

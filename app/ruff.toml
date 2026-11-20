@@ -1,0 +1,19 @@
+# Ruff = Python linter + formatter (one fast tool replacing flake8, isort, black, bandit-lite...).
+# Docs: https://docs.astral.sh/ruff/rules/
+target-version = "py313"
+line-length = 100
+
+[lint]
+select = [
+  "E", "W",  # pycodestyle: style errors and warnings
+  "F",       # pyflakes: unused imports/variables, undefined names (real bugs)
+  "I",       # isort: import ordering
+  "B",       # flake8-bugbear: likely bugs and bad design
+  "UP",      # pyupgrade: use modern Python syntax
+  "S",       # flake8-bandit: security issues (hardcoded secrets, SQL injection, eval...)
+  "SIM",     # flake8-simplify: simpler equivalent code
+]
+
+[lint.per-file-ignores]
+# S101 = "use of assert". assert is exactly how pytest tests work.
+"tests/**" = ["S101"]

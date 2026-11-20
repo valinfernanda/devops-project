@@ -11,36 +11,43 @@
 #   runtime → slim base + the venv + app code, non-root (what gets deployed)
 # =============================================================================
 
-ARG PYTHON_VERSION=3.13
+# Base image pinned by DIGEST (@sha256:...), not just by tag. A tag like
+# "3.13-slim" is re-pointed to a new image every few weeks; a digest always
+# means the exact same bytes → reproducible builds. Dependabot proposes digest
+# updates as pull requests, so we still get security fixes, but reviewed.
+# Both stages must use the same base (same Python), so keep the two lines in sync.
 
 # ----------------------------------------------------------------- builder ---
-FROM python:${PYTHON_VERSION}-slim AS builder
+FROM python:3.13-slim@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90 AS builder
 
 ENV PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_ROOT_USER_ACTION=ignore
 
 # A virtualenv keeps all installed packages in ONE folder we can copy later.
-RUN python -m venv /opt/venv
+# --without-pip: the venv gets NO pip of its own. The app never needs pip at
+# runtime, and pip vendors libraries (urllib3, msgpack...) that scanners flag.
+# We install INTO the venv with the base image's pip instead (--python ...).
+RUN python -m venv --without-pip /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
 # Copy ONLY the lock file first. This layer is cached until requirements.txt
 # changes, so editing app code does not reinstall every dependency.
 COPY requirements.txt /tmp/requirements.txt
-RUN pip install -r /tmp/requirements.txt
+RUN /usr/local/bin/pip --python /opt/venv/bin/python install -r /tmp/requirements.txt
 
 # -------------------------------------------------------------------- test ---
 FROM builder AS test
 
 COPY requirements-dev.txt /tmp/requirements-dev.txt
-RUN pip install -r /tmp/requirements-dev.txt
+RUN /usr/local/bin/pip --python /opt/venv/bin/python install -r /tmp/requirements-dev.txt
 
 WORKDIR /app
 COPY . .
 CMD ["pytest", "-v"]
 
 # ----------------------------------------------------------------- runtime ---
-FROM python:${PYTHON_VERSION}-slim AS runtime
+FROM python:3.13-slim@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90 AS runtime
 
 # PYTHONDONTWRITEBYTECODE: don't write .pyc files (read-only friendly)
 # PYTHONUNBUFFERED: print logs immediately (no buffering), so `docker logs` is live
@@ -48,9 +55,17 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PATH="/opt/venv/bin:$PATH"
 
-# Dedicated unprivileged user. A fixed UID (10001) lets Kubernetes enforce
-# "runAsNonRoot" and makes file permissions predictable.
-RUN groupadd --system --gid 10001 app \
+# 1) Security updates: install Debian fixes released after the base image was built
+#    (Trivy found a fixable HIGH CVE in zlib1g). Clean apt lists in the SAME layer.
+# 2) Remove the base image's pip: not needed to run the app, and it carries
+#    vendored libraries with known CVEs.
+# 3) Dedicated unprivileged user. A fixed UID (10001) lets Kubernetes enforce
+#    "runAsNonRoot" and makes file permissions predictable.
+RUN apt-get update \
+ && apt-get upgrade -y --no-install-recommends \
+ && rm -rf /var/lib/apt/lists/* \
+ && /usr/local/bin/python -m pip uninstall -y pip \
+ && groupadd --system --gid 10001 app \
  && useradd --system --uid 10001 --gid app --no-create-home --shell /usr/sbin/nologin app
 
 WORKDIR /app
