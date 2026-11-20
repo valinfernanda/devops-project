@@ -4,7 +4,7 @@
 > Docker, a multi-node Kubernetes cluster, Terraform, Helm, and Ansible, with enough free disk space
 > to do so reliably.
 
-**Status:** ✅ almost done. Only 👤 Step 0.5c (your Git name) is left.
+**Status:** ✅ almost done. Only 👤 Step 0.5e (create the GitHub repo and push) is left.
 
 **Legend:** ✅ done · ⏳ not started / waiting · ⚠️ problem found · ⏭️ skipped (not needed) · 👤 **you** must do this step (admin rights or a GUI click)
 
@@ -23,7 +23,7 @@ flowchart TD
     B5 --> B6["0.2f Verify free space ✅"]
     B6 --> C["0.3 Decision: work inside WSL Ubuntu ✅"]
     C --> D["0.4 Install tools in Ubuntu ✅"]
-    D --> E["0.5 Git setup<br/>0.5c 👤 set user.name ⏳"]
+    D --> E["0.5 Git setup ✅ (name, first commit)<br/>0.5e 👤 create GitHub repo + push ⏳"]
     E --> F["0.6 Smoke test: first kind cluster ✅"]
     F --> G(["Phase 1: App + Docker"])
 
@@ -565,9 +565,10 @@ git init -b main      # create a new repo; -b main = name the first branch "main
 
 [`.gitattributes`](../.gitattributes) forces LF line endings for scripts and config files (see Step 0.4).
 
-### 0.5c 👤 Set your Git name ⏳
+### 0.5c Set your Git name ✅
 
-Check result: **email is set, `user.name` is empty**, in *both* Windows Git and Ubuntu Git.
+Check result before: **email was set, `user.name` was empty**, in *both* Windows Git and Ubuntu Git.
+Set to your GitHub username **`valinfernanda`** in both places.
 
 > 📚 **Important concept:** Windows and WSL Ubuntu are two separate systems, so they have **two
 > separate Git configs** (`C:\Users\Valin\.gitconfig` and `/home/valin/.gitconfig`). Since you'll
@@ -587,6 +588,72 @@ git config --global user.name "Your Name"
 ```
 
 `--global` = applies to every repo for this user (stored in `~/.gitconfig`).
+
+We also set `git config --global init.defaultBranch main` in Ubuntu, so every future `git init` uses `main`.
+
+### 0.5d First commit ✅
+
+#### 🎯 Objective
+Save a snapshot of Phase 0 into Git history.
+
+#### 📚 Concepts: the three areas of Git
+
+```mermaid
+flowchart LR
+    W["Working directory<br/>(your files)"] -- "git add" --> S["Staging area<br/>(what goes in the next commit)"]
+    S -- "git commit" --> R["Local repository<br/>(history, in .git/)"]
+    R -- "git push" --> GH["GitHub<br/>(remote copy)"]
+```
+
+#### ⌨️ Commands
+
+```bash
+git add -A          # stage everything: new, changed, and deleted files
+git status --short  # check what will be committed (A = added)
+git commit -m "Phase 0: workstation setup"
+git log --oneline   # see history
+```
+
+#### 📤 Output
+
+```
+A  .gitattributes
+A  .gitignore
+A  README.md
+A  docs/00-setup.md
+A  docs/images/00-docker-disk-location-before.png
+A  scripts/00-install-tools.sh
+940160d Phase 0: workstation setup
+author: valinfernanda
+```
+
+> ℹ️ You may see `warning: LF will be replaced by CRLF` for `.md` files. That's Windows Git's
+> `core.autocrlf=true` converting line endings **in your working folder only**; the repository
+> stores LF. It's harmless for Markdown, and `.gitattributes` protects `.sh`/`.yaml`/`.tf` files.
+
+### 0.5e 👤 Create the GitHub repository and push ⏳
+
+#### 🎯 Objective
+Put the repo on GitHub (`github.com/valinfernanda/devops-project`). Phase 2 (CI with GitHub Actions)
+needs it there.
+
+#### ❓ Why public?
+- **GitHub Actions minutes are free and unlimited for public repos** (private repos have a monthly limit).
+- It becomes **portfolio** you can show recruiters.
+- It's safe *because* `.gitignore` keeps secrets out. Never commit secrets to a public repo.
+
+#### Steps
+1. Open <https://github.com/new>.
+2. **Repository name:** `devops-project` · **Public** · leave *Add a README*, *.gitignore*, *license* **unchecked** (our repo already has them; adding them on GitHub creates a conflicting first commit).
+3. Click **Create repository**.
+4. Then connect and push:
+
+```bash
+git remote add origin https://github.com/valinfernanda/devops-project.git   # "origin" = conventional name for the main remote
+git push -u origin main    # -u = remember origin/main as the default upstream, so later just "git push"
+```
+
+The first push opens a **browser sign-in** (Git Credential Manager). Sign in to GitHub there.
 
 ---
 
