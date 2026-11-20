@@ -1,6 +1,7 @@
-# Shell scripts must keep Linux line endings (LF), even when edited on Windows.
-# Otherwise bash fails with errors like: $'\r': command not found
-*.sh text eol=lf
-*.yaml text eol=lf
-*.yml text eol=lf
-*.tf text eol=lf
+# Keep Linux line endings (LF) for ALL text files, even on Windows.
+# Docker builds, bash, and many Linux tools break or misbehave with Windows CRLF
+# (e.g. bash: $'\r': command not found). "text=auto" lets Git detect binary files (PNG) itself.
+* text=auto eol=lf
+
+# Explicitly binary
+*.png binary
