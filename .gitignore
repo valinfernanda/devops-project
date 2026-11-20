@@ -1,0 +1,22 @@
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!example.tfvars
+.terraform.lock.hcl.bak
+
+# Kubernetes / secrets
+kubeconfig*
+*.pem
+*.key
+.env
+
+# Ansible
+*.retry
+
+# Editor / OS
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
