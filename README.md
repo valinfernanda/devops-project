@@ -56,7 +56,7 @@ flowchart LR
 ## Roadmap & progress
 
 - [x] **Phase 0: Workstation setup** → [docs/00-setup.md](docs/00-setup.md) ✅
-- [ ] Phase 1: Application + Docker
+- [x] **Phase 1: Application + Docker** → [docs/01-app-docker.md](docs/01-app-docker.md) ✅
 - [ ] Phase 2: CI with GitHub Actions
 - [ ] Phase 3: Kubernetes basics → intermediate + Helm
 - [ ] Phase 4: Terraform (cluster and add-ons as code)
@@ -69,16 +69,35 @@ flowchart LR
 > We build all the skills locally first, prepare the Azure Terraform code in advance, and only then
 > sign up, so no day of the trial is wasted.
 
+## Quick start (inside WSL Ubuntu)
+
+```bash
+cp .env.example .env                 # then set POSTGRES_PASSWORD
+docker compose up -d --build         # db → migrate → api
+curl localhost:8000/health           # {"status":"ok",...}
+docker compose run --rm tests        # 8 tests, own throwaway database
+```
+
+API docs: <http://localhost:8000/docs>
+
 ## Folder structure (grows each phase)
 
 ```
 devops-project/
 ├── README.md              ← you are here
+├── compose.yaml           ← local stack: PostgreSQL + migrations + API (+ tests)
+├── .env.example           ← template for local secrets (.env itself is never committed)
 ├── .gitignore             ← files that must never be committed (secrets, state)
 ├── .gitattributes         ← forces Linux line endings for scripts/configs
+├── app/                   ← Task API (FastAPI + PostgreSQL)
+│   ├── Dockerfile         ← production multi-stage image (311 MB, non-root)
+│   ├── taskapi/           ← application code
+│   ├── migrations/        ← Alembic database migrations
+│   └── tests/             ← unit + integration tests
 ├── scripts/
 │   └── 00-install-tools.sh   ← installs kubectl, kind, terraform, helm, ansible, k9s
 └── docs/                  ← one detailed guide per phase
     ├── 00-setup.md
+    ├── 01-app-docker.md
     └── images/            ← screenshots used in the guides
 ```

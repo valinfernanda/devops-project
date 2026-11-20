@@ -1,0 +1,103 @@
+# =============================================================================
+# Local development stack: PostgreSQL + migrations + Task API (+ tests on demand)
+#
+#   cp .env.example .env              # once: create your local secrets file
+#   docker compose up -d --build      # start db → migrate → api
+#   docker compose run --rm tests     # run unit + integration tests (own throwaway DB)
+#   docker compose rm -sf test-db     # remove ONLY the test database afterwards
+#                                     # (careful: "--profile test down" stops EVERYTHING)
+#   docker compose down               # stop (data is KEPT in the db-data volume)
+#   docker compose down -v            # stop AND delete the database volume
+# =============================================================================
+
+name: devops-lab
+
+# "x-" blocks are ignored by Compose; we use them as reusable YAML anchors (&name / *name).
+x-app-env: &app-env
+  APP_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-taskapi}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/${POSTGRES_DB:-taskapi}
+  APP_LOG_LEVEL: ${APP_LOG_LEVEL:-info}
+
+services:
+  # --------------------------------------------------------------- database ---
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-taskapi}
+      POSTGRES_USER: ${POSTGRES_USER:-taskapi}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - db-data:/var/lib/postgresql/data      # named volume: data survives container restarts
+    healthcheck:
+      # $$ = a literal $, so the variable is expanded INSIDE the container, not by Compose
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    # No "ports:" on purpose: the database is only reachable from inside this stack.
+    restart: unless-stopped
+
+  # ------------------------------------------------------ one-off migration ---
+  migrate:
+    image: taskapi:local
+    build:
+      context: ./app
+      target: runtime
+    command: ["alembic", "upgrade", "head"]
+    environment: *app-env
+    depends_on:
+      db:
+        condition: service_healthy          # wait until pg_isready succeeds
+    restart: "no"                           # runs once and exits (like a Kubernetes Job)
+
+  # -------------------------------------------------------------------- api ---
+  api:
+    image: taskapi:local
+    build:
+      context: ./app
+      target: runtime
+    environment:
+      <<: *app-env                          # merge the shared variables...
+      APP_VERSION: ${APP_VERSION:-dev}      # ...and add one more
+    ports:
+      - "8000:8000"                         # host:container → http://localhost:8000
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully   # only start after migrations succeeded
+    restart: unless-stopped
+
+  # ------------------------------------------------------ tests (on demand) ---
+  # Tests get their OWN throwaway database. They empty tables between tests, so they
+  # must never point at the dev database (or any database with real data).
+  test-db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: taskapi_test
+      POSTGRES_USER: test
+      POSTGRES_PASSWORD: test               # fine: this DB only lives during a test run
+    tmpfs:
+      - /var/lib/postgresql/data            # stored in RAM: fast, and gone when stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U test -d taskapi_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+    profiles: ["test"]
+
+  tests:
+    image: taskapi:test
+    build:
+      context: ./app
+      target: test
+    environment:
+      APP_DATABASE_URL: postgresql+psycopg://test:test@test-db:5432/taskapi_test
+    # Migrate the empty test database first, then run every test.
+    command: ["sh", "-c", "alembic upgrade head && pytest -v"]
+    depends_on:
+      test-db:
+        condition: service_healthy
+    profiles: ["test"]                      # NOT started by "up"; only by "run tests"
+
+volumes:
+  db-data:

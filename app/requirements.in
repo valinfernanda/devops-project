@@ -1,0 +1,8 @@
+# Runtime dependencies: what the app needs to RUN.
+# Edit this file, then regenerate the lock file (requirements.txt), see docs/01-app-docker.md.
+fastapi
+uvicorn[standard]
+sqlalchemy
+psycopg[binary]
+alembic
+pydantic-settings

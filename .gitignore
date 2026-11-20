@@ -20,3 +20,9 @@ kubeconfig*
 .idea/
 Thumbs.db
 .DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/

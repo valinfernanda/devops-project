@@ -1,0 +1,6 @@
+# Development/test dependencies: only needed to TEST, never shipped in the production image.
+# -c = "constraint": reuse the exact versions already locked in requirements.txt.
+-c requirements.txt
+pytest
+# HTTP client used by FastAPI's TestClient (Starlette deprecated plain "httpx" for this)
+httpx2

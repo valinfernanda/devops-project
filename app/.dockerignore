@@ -1,0 +1,23 @@
+# Files that are NEVER sent to the Docker build (the "build context").
+# Smaller context = faster builds, and no secrets or junk can end up in an image.
+
+# Python caches / local environments
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Secrets and local config
+.env
+.env.*
+
+# Docker files themselves are not needed inside the image
+Dockerfile*
+.dockerignore
+
+# Editor / OS junk
+.vscode/
+.idea/
+*.swp
+.DS_Store
