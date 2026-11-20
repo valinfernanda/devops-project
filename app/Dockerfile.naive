@@ -1,7 +1,7 @@
 # ⚠️ NAIVE Dockerfile: kept on purpose as a "before" example. Do NOT use in production.
 # Compare it with ./Dockerfile; docs/01-app-docker.md explains every problem in it.
 
-FROM python:3.13
+FROM python:3.15
 
 WORKDIR /app
 
