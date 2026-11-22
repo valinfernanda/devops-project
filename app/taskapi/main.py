@@ -15,7 +15,7 @@ Business endpoints:
 import logging
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, HTTPException, Response, status
+from fastapi import Depends, FastAPI, HTTPException, Query, Response, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -65,6 +65,20 @@ def _get_or_404(session: Session, task_id: int) -> Task:
 @app.get("/tasks", response_model=list[TaskOut], tags=["tasks"])
 def list_tasks(session: SessionDep) -> list[Task]:
     return list(session.scalars(select(Task).order_by(Task.id)))
+
+
+@app.get("/tasks/search", response_model=list[TaskOut], tags=["tasks"])
+def search_tasks(
+    q: Annotated[str, Query(min_length=1, max_length=200)], session: SessionDep
+) -> list[Task]:
+    """Case-insensitive search in task titles.
+
+    icontains() sends q to the database as a bound PARAMETER, separately from the
+    SQL text, so the database never executes it as SQL: no injection possible.
+    autoescape=True also makes % and _ in q match literally instead of as wildcards.
+    """
+    stmt = select(Task).where(Task.title.icontains(q, autoescape=True)).order_by(Task.id)
+    return list(session.scalars(stmt))
 
 
 @app.post("/tasks", response_model=TaskOut, status_code=201, tags=["tasks"])
