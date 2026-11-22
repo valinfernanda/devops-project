@@ -129,6 +129,7 @@ and monitoring will rely on.
 | GET | `/ready` | **Readiness**: can it serve traffic? (checks the DB) | 200 / 503 |
 | GET | `/tasks` | List all tasks | 200 |
 | POST | `/tasks` | Create a task `{"title": "..."}` | 201 / 422 |
+| GET | `/tasks/search?q=...` | Case-insensitive title search *(added in Phase 2, PR #2)* | 200 / 422 |
 | GET | `/tasks/{id}` | Get one task | 200 / 404 |
 | PATCH | `/tasks/{id}` | Update `title` and/or `done` | 200 / 404 / 422 |
 | DELETE | `/tasks/{id}` | Delete a task | 204 / 404 |

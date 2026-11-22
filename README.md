@@ -60,7 +60,7 @@ flowchart LR
 
 - [x] **Phase 0: Workstation setup** → [docs/00-setup.md](docs/00-setup.md) ✅
 - [x] **Phase 1: Application + Docker** → [docs/01-app-docker.md](docs/01-app-docker.md) ✅
-- [ ] **Phase 2: CI with GitHub Actions** → [docs/02-ci.md](docs/02-ci.md) ⏳ *pipeline live; branch protection next*
+- [x] **Phase 2: CI with GitHub Actions** → [docs/02-ci.md](docs/02-ci.md) ✅
 - [ ] Phase 3: Kubernetes basics → intermediate + Helm
 - [ ] Phase 4: Terraform (cluster and add-ons as code)
 - [ ] Phase 5: Ansible (provision VMs + install k3s)
@@ -78,7 +78,7 @@ flowchart LR
 cp .env.example .env                 # then set POSTGRES_PASSWORD
 docker compose up -d --build         # db → migrate → api
 curl localhost:8000/health           # {"status":"ok",...}
-docker compose run --rm tests        # 8 tests, own throwaway database
+docker compose run --rm tests        # 12 tests, own throwaway database
 ```
 
 API docs: <http://localhost:8000/docs>
