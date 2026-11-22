@@ -7,6 +7,27 @@ This project is built **one step at a time**. Every phase has its own guide in [
 Each guide is written so you can **redo everything on your own** and understand *why* each step exists,
 not just *what* to type.
 
+## 📖 How to study this repo on your own
+
+Everything we did is written down: concepts, every command, every click on GitHub, and every mistake
+we made along the way. Suggested order:
+
+| # | Read | Why |
+|---|---|---|
+| 1 | [docs/glossary.md](docs/glossary.md) | Keep it open in a second tab: every technical word, in plain English |
+| 2 | [docs/git-github-basics.md](docs/git-github-basics.md) | Git, branches, pull requests, merging, from zero (+ 4 practice exercises) |
+| 3 | [docs/00-setup.md](docs/00-setup.md) | Phase 0: prepare the laptop |
+| 4 | [docs/01-app-docker.md](docs/01-app-docker.md) | Phase 1: the app, Docker, Compose |
+| 5 | [docs/02-ci.md](docs/02-ci.md) | Phase 2: CI, security scans, branch protection, PR workflow |
+| ➕ | [docs/faq.md](docs/faq.md) | Every question asked along the way (Azure or not? what is kind? who owns the DB? …) |
+
+**How to use each guide:**
+1. Read a step's 🎯 Objective and 📚 Concepts **before** looking at commands.
+2. Run the commands yourself, and compare your output with the 📤 Output section.
+3. Read the 🧯 Troubleshooting / "real mistake" boxes: those are things that actually went wrong for us.
+4. At the end of each phase, do the **"Redo-it-yourself checklist"** without looking at the steps.
+5. If a word is unclear → [glossary](docs/glossary.md). If a Git/GitHub step is unclear → [basics](docs/git-github-basics.md).
+
 ## How every guide is structured
 
 Every step in every guide follows the same template:
@@ -108,5 +129,8 @@ devops-project/
     ├── 00-setup.md
     ├── 01-app-docker.md
     ├── 02-ci.md
+    ├── git-github-basics.md ← Git & GitHub from zero (+ exercises)
+    ├── glossary.md        ← every term, plain English
+    ├── faq.md             ← questions & answers from the journey
     └── images/            ← screenshots used in the guides
 ```
