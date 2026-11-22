@@ -33,6 +33,11 @@ def test_create_task_rejects_empty_title():
     assert response.status_code == 422
 
 
+def test_search_requires_a_query():
+    assert client.get("/tasks/search").status_code == 422
+    assert client.get("/tasks/search", params={"q": ""}).status_code == 422
+
+
 def test_create_task_rejects_too_long_title():
     response = client.post("/tasks", json={"title": "x" * 201})
     assert response.status_code == 422

@@ -49,6 +49,36 @@ def test_task_lifecycle():
     assert client.get(f"/tasks/{task['id']}").status_code == 404
 
 
+def test_search_is_case_insensitive():
+    for title in ["Learn Docker", "Learn Kubernetes", "Buy milk"]:
+        client.post("/tasks", json={"title": title})
+    response = client.get("/tasks/search", params={"q": "learn"})
+    assert response.status_code == 200
+    assert [t["title"] for t in response.json()] == ["Learn Docker", "Learn Kubernetes"]
+
+
+def test_search_is_not_vulnerable_to_sql_injection():
+    # Regression test for the SQL injection caught in PR #2.
+    client.post("/tasks", json={"title": "Learn Docker"})
+
+    # With string-built SQL this returned EVERY row. It must match nothing.
+    attack = client.get("/tasks/search", params={"q": "nomatch' OR '1'='1' --"})
+    assert attack.status_code == 200
+    assert attack.json() == []
+
+    # A destructive payload must be treated as plain text, and the table must survive.
+    assert client.get("/tasks/search", params={"q": "'; DROP TABLE tasks; --"}).status_code == 200
+    assert len(client.get("/tasks").json()) == 1
+
+
+def test_search_treats_wildcards_literally():
+    client.post("/tasks", json={"title": "100% done"})
+    client.post("/tasks", json={"title": "Learn Docker"})
+    assert [t["title"] for t in client.get("/tasks/search", params={"q": "%"}).json()] == [
+        "100% done"
+    ]
+
+
 def test_missing_task_returns_404():
     assert client.get("/tasks/999").status_code == 404
     assert client.patch("/tasks/999", json={"done": True}).status_code == 404
