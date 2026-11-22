@@ -216,3 +216,31 @@ re-learn it at your own pace:
 2. Re-read each phase guide, **running every command yourself** and comparing outputs.
 3. Do each phase's **"Redo-it-yourself checklist"** and the exercises in the Git guide.
 4. Ask about anything unclear; the answer gets added to the docs (like this file).
+
+---
+
+## Q12. Claude says it added a new section, but I don't see it on GitHub. Why?
+
+Because the change is on a **branch**, not on `main` yet. GitHub shows `main` by default.
+Real case: Steps 2.13/2.14 were pushed to `docs/pr-workflow`, but **no PR had been created**, so `main` didn't have them.
+
+| Where you look | Shows the new section? |
+|---|---|
+| GitHub repo page (default = `main`) | ❌ until the PR is merged |
+| GitHub with the branch selected | ✅ |
+| Your laptop folder | ✅ only if your folder is switched to that branch (`git branch --show-current`) |
+
+**How to see a branch on GitHub:** on the repo's **Code** tab, click the branch dropdown (it says `main`,
+top-left above the file list) → pick the branch. Or open a URL with the branch name in it:
+`https://github.com/<you>/<repo>/blob/<branch>/docs/02-ci.md`
+
+**How to get it into `main`:** create the PR (the link printed by `git push`, or `/pull/new/<branch>`),
+wait for green, **Squash and merge**. See [02-ci.md Step 2.13](02-ci.md#step-213-working-with-pull-requests-day-to-day-)
+and [git-github-basics.md §4–6](git-github-basics.md).
+
+**Check from the terminal** whether `main` on GitHub already has something:
+
+```bash
+curl -s https://raw.githubusercontent.com/<you>/<repo>/main/docs/02-ci.md | grep "^## Step 2.13"
+```
+No output = not on `main` yet.
