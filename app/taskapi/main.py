@@ -16,7 +16,7 @@ import logging
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, HTTPException, Response, status
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from .config import get_settings
@@ -65,6 +65,13 @@ def _get_or_404(session: Session, task_id: int) -> Task:
 @app.get("/tasks", response_model=list[TaskOut], tags=["tasks"])
 def list_tasks(session: SessionDep) -> list[Task]:
     return list(session.scalars(select(Task).order_by(Task.id)))
+
+
+@app.get("/tasks/search", response_model=list[TaskOut], tags=["tasks"])
+def search_tasks(q: str, session: SessionDep) -> list[Task]:
+    # Search tasks whose title contains q
+    sql = f"SELECT * FROM tasks WHERE title ILIKE '%{q}%' ORDER BY id"
+    return list(session.scalars(select(Task).from_statement(text(sql))))
 
 
 @app.post("/tasks", response_model=TaskOut, status_code=201, tags=["tasks"])
