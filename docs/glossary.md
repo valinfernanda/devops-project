@@ -1,6 +1,7 @@
 # Glossary
 
 Every technical term used in this project, in plain English, with where it first appears.
+Also: **HB** = [github-handbook](github-handbook.md).
 Phases: **P0** = [00-setup](00-setup.md) · **P1** = [01-app-docker](01-app-docker.md) · **P2** = [02-ci](02-ci.md) · **Git** = [git-github-basics](git-github-basics.md).
 Updated every phase.
 
@@ -50,8 +51,14 @@ Updated every phase.
 | **Exec form vs shell form** | `CMD ["uvicorn", …]` (app is PID 1, gets signals) vs `CMD uvicorn …` (runs via `sh`) | P1 1.7 |
 | **Exit code** | Number a command returns: `0` = success, anything else = failure. CI uses it to decide ✅/❌ | P1, P2 |
 | **Fail fast** | Run cheap checks first and stop early on failure | P2 2.7 |
+| **Bisect** (`git bisect`) | Binary search through commits to find the one that broke something | HB 2.9 |
+| **Blame** (`git blame`) | Shows who last changed each line of a file | HB 2.9 |
+| **CODEOWNERS** | File that auto-assigns required reviewers per folder | HB D8 |
+| **Environment** (GitHub) | Named deploy target (dev/prod) with approvals and its own secrets | HB D9 |
 | **Fast-forward** | Updating a branch by just moving its label forward (no merge needed) | Git §7 |
 | **Fixture** (pytest) | Reusable setup/cleanup code for tests | P1 1.6 |
+| **Fetch** vs **Pull** | fetch = download news only; pull = fetch + update your branch and files | HB 2.2 |
+| **Force-with-lease** | A safer force push: refuses if someone else pushed meanwhile | HB P3 |
 | **Formatter** | Tool that rewrites code layout consistently (`ruff format`) | P2 2.2 |
 | **gitleaks** | Scanner that finds secrets (passwords, keys) in Git history | P2 2.4 |
 | **`.gitattributes`** | Tells Git how to treat files; ours forces Linux (LF) line endings | P0 0.5, P1 |
@@ -100,6 +107,9 @@ Updated every phase.
 | **Prune** (Docker) | Delete unused containers/images/cache | P0 0.2b |
 | **Pull request (PR)** | A GitHub request to merge a branch, with review + CI checks | Git §6, P2 2.13 |
 | **Push / pull / fetch** | Upload commits / download + update / download only | Git §5 |
+| **Rebase** | Replay your commits on top of another branch (straight history) | HB 2.3, 2.5 |
+| **Release** (GitHub) | A version (tag) with notes and downloads | HB D4 |
+| **Revert** | A new commit that undoes an earlier one (safe for pushed commits) | HB 2.6 |
 | **Readiness probe** (`/ready`) | "Can it serve traffic now?" Failure → no traffic, no restart | P1 1.3 |
 | **Registry** | A server that stores images (Docker Hub, GHCR) | P2 |
 | **Regression test** | A test that ensures a fixed bug never comes back | P2 2.12 |
@@ -120,14 +130,17 @@ Updated every phase.
 | **SHA** (commit SHA) | A commit's unique ID, e.g. `2c0c748` | Git §3 |
 | **Smoke test** | A quick check that the basics work | P0 0.6 |
 | **SQL injection** | User input interpreted as SQL commands, letting attackers read or change data | P2 2.12 |
+| **Stash** | Temporarily park uncommitted work | HB 2.7 |
 | **Squash and merge** | Combine all branch commits into one commit on `main` | Git §7 |
 | **Staging area** | Git's "basket" of changes for the next commit (`git add`) | Git §2 |
 | **Status check** | A CI result (✅/❌) attached to a commit; rulesets can require them | P2 2.11 |
 | **Supply-chain attack** | Compromising a dependency/tool you use, instead of you directly | P2 2.6 |
+| **Tag** (Git tag) | A permanent name on a commit, e.g. `v1.0.0` | HB 2.8 |
 | **Tag** (image tag) | A human name for an image version (`:main`, `:sha-2c0c748`); can be moved | P2 2.6 |
 | **Terraform** | Tool that creates infrastructure from code files (Phase 4) | P0 0.4 |
 | **tmpfs** | Storage in RAM; fast and wiped on stop (our `test-db`) | P1 1.13 |
 | **Trivy** | Vulnerability scanner for dependencies and images | P2 2.5 |
+| **Trunk-based / GitHub Flow / Git Flow** | Team branching strategies | HB Part 4 |
 | **12-factor app** | A checklist for cloud-friendly apps (config in env vars, logs to stdout…) | P1 1.1 |
 | **Unit test** | A fast test of one piece of logic in isolation (no database) | P1 1.6 |
 | **Vendored dependency** | A library copied *inside* another package (pip ships its own urllib3) | P2 2.5 |
