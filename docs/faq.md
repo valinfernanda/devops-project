@@ -377,6 +377,12 @@ Our current checks and where each one comes from:
 > Dependabot (`.github/dependabot.yml`) is **not** a check. It's a robot that *opens* PRs (like #1), and those PRs
 > then go through the same checks.
 
+> **Why does the PR show 9 checks, not 7?** Two extra ones, named **`Trivy`** and **`CodeQL`**, come from GitHub's
+> *Code scanning* feature, not from a job of ours. Our jobs upload their findings (the SARIF file in `build`, and
+> CodeQL's results), and GitHub posts one summary check per tool: "did this PR add new security alerts?". They're
+> useful to look at, but they're **not** in the ruleset, so they don't block merging. Seen for real on PR #6:
+> `Trivy ✅`, `CodeQL ✅` plus our 7.
+
 ### Piece ②: the ruleset (which checks are required)
 
 Click path: repo → **Settings** → left sidebar *Code and automation* → **Rules → Rulesets** → `protect-main` →
@@ -462,3 +468,78 @@ Writing the workflows, choosing the tools, pinning versions and maintaining the 
 work. Programmers mostly *use* it: they open PRs, read why a check is red ([02-ci.md Step 2.14](02-ci.md#step-214-reading-ci-results-where-to-click-when-something-is-red-)),
 fix it, and push again. Programmers also write **tests** (new pytest files), and the existing `test` job picks
 them up automatically, so adding a test needs no workflow change.
+
+---
+
+## Q15. What are the `#1`, `#2` … `#6` numbers?
+
+They are **issue / pull request numbers**. Every repo has **one counter**, and each new **issue** or **pull
+request** gets the next number from it: 1, 2, 3… A number is never reused, even after the PR is closed or merged.
+It's the PR's permanent ID.
+
+Our repo so far (real data from the GitHub API):
+
+| # | What it is | Who opened it | State |
+|---|---|---|---|
+| #1 | `build(deps): Bump python from 3.13 to 3.15 in /app` | Dependabot (robot) | 🟢 Open (not merged on purpose) |
+| #2 | `Add task search endpoint` | you | 🟣 Merged |
+| #3 | `docs: Phase 2 complete (ruleset, vulnerable-PR experiment, summary)` | you | 🟣 Merged |
+| #4 | `Docs/pr workflow` | you | 🟣 Merged |
+| #5 | `Docs/GitHub handbook` | you | 🟣 Merged |
+| #6 | `Docs/faq q14` | you | (this FAQ entry's own PR) |
+
+> If you create an **Issue** next, it becomes **#7**: issues and PRs share the same counter. That's why in big
+> repos PR numbers sometimes "jump" (e.g. #41 → #45): the numbers in between went to issues.
+
+### What the number is used for
+
+**1. The PR's address.** `#6` = <https://github.com/valinfernanda/devops-project/pull/6>. Short, permanent, easy
+to say: "please review #6".
+
+**2. Linking a commit on `main` back to its PR.** With *Squash and merge*, GitHub adds `(#N)` to the end of
+the commit title:
+
+```
+$ git log --oneline main
+5618b63 Docs/GitHub handbook (#5)          ← this commit came from PR #5
+0e03036 Docs/pr workflow (#4)
+da96f59 docs: Phase 2 complete (ruleset, vulnerable-PR experiment, summary) (#3)
+2c0c748 Add task search endpoint (#2)
+2e9f220 docs: Phase 2 first CI run results, …   ← no (#N): pushed directly, before main was protected
+21292e7 Phase 2: CI pipeline with GitHub Actions
+```
+
+On GitHub, `(#5)` in a commit title is a **clickable link** to the PR. That's why `(#N)` matters in real teams:
+from any line of code you can go `git blame` → commit → `(#N)` → the PR, and see **why** the change was made,
+the review discussion, and the CI results. (The last two commits have no number because they were pushed straight
+to `main` in Phase 2, before the ruleset existed. Today that's impossible.)
+
+**3. Auto-links anywhere on GitHub.** Typing `#5` in a PR description, issue or comment turns into a link with a
+preview. Another repo: `owner/repo#5`.
+
+**4. Closing issues automatically.** If a PR description says `Fixes #7` (or `Closes #7`, `Resolves #7`), merging
+the PR **closes issue #7 automatically**. That's the standard programmer workflow: issue → branch → PR "Fixes #7" → merge.
+
+**5. DevOps uses.** Release notes are generated from PR titles and numbers (*Releases → Generate release notes*
+lists "Add task search endpoint by @you in #2"). Preview environments are named by number (`pr-6.example.com`).
+Incident reports say "broke in #42, rolled back by reverting #42".
+
+### Number vs hash: don't mix them up
+
+| | `#5` | `5618b63` |
+|---|---|---|
+| What | Pull request (a *conversation*: title, description, commits, checks, review) | One **commit** (a snapshot of the files) |
+| Made by | GitHub | Git |
+| Exists in Git itself? | ❌ only on GitHub (Git just sees the text "(#5)" in a message) | ✅ |
+| Example | `/pull/5` | `git show 5618b63` |
+
+### Find things by number from the terminal
+
+```bash
+git log --oneline --grep "#5"                                          # which commit on main came from PR #5?
+curl -s https://api.github.com/repos/valinfernanda/devops-project/pulls/5 | grep -E '"(title|merged_at)"'
+```
+
+> 💡 The auto-generated squash titles (`Docs/pr workflow`, `Docs/faq q14`) come from the **branch name**.
+> GitHub turns `docs/faq-q14` into "Docs/faq q14". Edit the title in the merge box to a real sentence, e.g.
+> `docs(faq): explain PR checks and #numbers (#6)`. That title is what stays in `git log` forever.
