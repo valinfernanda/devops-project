@@ -278,3 +278,162 @@ git ls-remote --heads origin my-branch     # prints a line → the branch IS on 
 curl -s "https://api.github.com/repos/<you>/<repo>/pulls?head=<you>:my-branch" | grep '"number"'
                                             # prints nothing → no PR yet
 ```
+
+---
+
+## Q14. When I open a PR, CI runs a bunch of checks automatically. Where is that set up, and how do I change it?
+
+**Short answer:** two separate pieces work together. Neither one is "magic"; you can open both.
+
+| Piece | Where it lives | What it decides | Who changes it |
+|---|---|---|---|
+| **① Workflow files** | In the repo: `.github/workflows/ci.yml`, `codeql.yml` | **WHAT** runs and **WHEN** (which jobs, which commands, on which events) | Anyone, via a PR (it's code) |
+| **② Ruleset** `protect-main` | GitHub **Settings → Rules → Rulesets** (not in the repo) | **WHICH** of those checks must be ✅ before the Merge button works | Repo admin (you), by clicking |
+
+Without ①, nothing runs. Without ②, checks still run, but a red ❌ is only *advice*: you could still click Merge.
+
+### How it flows when you open a PR
+
+```mermaid
+flowchart TD
+    A["You click 'Create pull request'<br/>(or push a new commit to the PR's branch)"] --> B["GitHub fires the event: pull_request"]
+    B --> C["GitHub reads every file in .github/workflows/<br/>from the PR's branch"]
+    C --> D{"Does the file say<br/>on: pull_request ?"}
+    D -->|"ci.yml: yes"| E["Starts jobs on fresh Ubuntu VMs (runners)"]
+    D -->|"codeql.yml: yes"| E
+    E --> F["Each job reports a CHECK<br/>named after its 'name:' line<br/>e.g. 'Tests (unit + integration)' ✅/❌"]
+    F --> G{"Ruleset protect-main:<br/>are all 7 REQUIRED checks ✅<br/>and is the branch up to date?"}
+    G -->|no| H["Merge button blocked<br/>'Required statuses must pass'"]
+    G -->|yes| I["Merge button enabled ✅"]
+```
+
+### Piece ①: the workflow file (what runs, and when)
+
+The top of `.github/workflows/ci.yml`, with comments added:
+
+```yaml
+name: CI                     # the workflow's name (shown in the Actions tab)
+
+on:                          # WHEN: the events that start this workflow
+  pull_request:              #  → every PR opened / every new commit pushed to a PR   ← this is why CI runs on your PR
+  push:
+    branches: [main]         #  → every push to main (= every merge); this run also publishes the image
+  workflow_dispatch:         #  → a manual "Run workflow" button in the Actions tab
+
+jobs:                        # WHAT: each job = one check on the PR
+  lint:                      # job id (used in 'needs:')
+    name: Lint (ruff + hadolint)   # ← THIS text is the check name you see on the PR and in the ruleset
+    runs-on: ubuntu-24.04          # a fresh virtual machine from GitHub, deleted afterwards
+    steps:
+      - uses: actions/checkout@<sha>               # download the PR's code onto the VM
+      - run: ruff check --output-format=github .   # the actual command; exit code ≠ 0 → check ❌
+  test:
+    name: Tests (unit + integration)
+    needs: lint              # order: only starts after lint is green
+    ...
+```
+
+**The one rule that decides ✅ or ❌:** every `run:` line is a shell command. Exit code `0` = pass; any other exit
+code = the step fails → the job fails → that check is ❌ on the PR. Tools like ruff, pytest, gitleaks and Trivy are
+"checks" simply because they exit with an error when they find a problem.
+
+Our current checks and where each one comes from:
+
+| Check name on the PR | File → job id | What it checks | Phase 2 step |
+|---|---|---|---|
+| `Lint (ruff + hadolint)` | ci.yml → `lint` | Python style/bugs, Dockerfile best practices | 2.2, 2.3 |
+| `Secret scan (gitleaks)` | ci.yml → `secrets` | Passwords/keys in any commit, whole history | 2.4 |
+| `Dependency scan (Trivy fs)` | ci.yml → `dependency-scan` | Known CVEs in `requirements*.txt` | 2.5 |
+| `Tests (unit + integration)` | ci.yml → `test` | 12 pytest tests against a real PostgreSQL | 2.7 |
+| `Build, scan & publish image` | ci.yml → `build` | Image builds; Trivy finds no fixable HIGH/CRITICAL; pushes to GHCR **only on main** | 2.5, 2.7 |
+| `Analyze (python)` | codeql.yml → `analyze` (matrix) | SAST: SQL injection etc. in app code | 2.8 |
+| `Analyze (actions)` | codeql.yml → `analyze` (matrix) | Insecure workflow files | 2.8 |
+
+> Dependabot (`.github/dependabot.yml`) is **not** a check. It's a robot that *opens* PRs (like #1), and those PRs
+> then go through the same checks.
+
+### Piece ②: the ruleset (which checks are required)
+
+Click path: repo → **Settings** → left sidebar *Code and automation* → **Rules → Rulesets** → `protect-main` →
+**Require status checks to pass** → the list of 7 names. Full setup: [02-ci.md Step 2.11](02-ci.md#step-211--branch-protection-with-a-ruleset-).
+
+The ruleset only knows check **names** (plain text). It doesn't know what a check does; it just waits until a check
+with exactly that name reports ✅.
+
+### Recipe: adding a NEW check (example: lint the shell scripts with ShellCheck)
+
+*Example only, not added to this project yet.*
+
+1. Branch: `git switch -c ci/shellcheck`
+2. Add a job to `.github/workflows/ci.yml` under `jobs:`:
+   ```yaml
+     shellcheck:
+       name: ShellCheck (scripts)
+       runs-on: ubuntu-24.04
+       steps:
+         - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+         - run: docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:v0.10.0 scripts/*.sh
+   ```
+   (Optional: add `shellcheck` to `build`'s `needs:` if the image build should wait for it.)
+3. Try the same command locally first (inside WSL), then commit, push, and **create the PR**.
+4. The PR now shows an **8th** check, `ShellCheck (scripts)`. It runs, but it's **not required** yet: even if it's ❌,
+   you could still merge.
+5. Merge the PR once green.
+6. Make it required: Settings → Rules → Rulesets → `protect-main` → *Require status checks* → **Add checks** →
+   type `ShellCheck` → select it → **Save changes**. (A check only shows up in that search after it has run at least
+   once in the last 7 days. That's why steps 3–5 come first.)
+7. Verify:
+   ```bash
+   curl -s https://api.github.com/repos/valinfernanda/devops-project/rules/branches/main | grep -o '"context": *"[^"]*"'
+   ```
+
+### Changing or removing a check
+
+| You want to… | Do this | Watch out |
+|---|---|---|
+| Change what a check does | Edit the job's `steps:` in a PR | The edit itself must pass CI to merge |
+| **Rename** a check | Change `name:` **and** update the ruleset to the new name | ⚠️ If you forget the ruleset, every PR waits forever: *"Expected — Waiting for status to be reported"* |
+| Remove a check | Remove it from the ruleset **first**, then delete the job | Same "waiting forever" trap if you do it the other way round |
+| Run a check only when some files change | `on: pull_request: paths: ['app/**']` | ⚠️ If that check is **required** and a PR doesn't touch `app/`, it never runs → the PR is stuck. Don't put `paths:` on required checks |
+| Run CI by hand | Actions tab → **CI** → **Run workflow** (thanks to `workflow_dispatch`) | — |
+
+### See which checks ran on a commit, from the terminal
+
+```bash
+curl -s https://api.github.com/repos/valinfernanda/devops-project/commits/0e03036/check-runs \
+  | grep -E '^      "(name|conclusion)"' | paste - -
+```
+
+Real output (main commit `0e03036`, duplicates removed):
+
+```
+      "name": "Analyze (actions)",            "conclusion": "success",
+      "name": "Analyze (python)",             "conclusion": "success",
+      "name": "Build, scan & publish image",  "conclusion": "success",
+      "name": "Tests (unit + integration)",   "conclusion": "success",
+      "name": "Dependency scan (Trivy fs)",   "conclusion": "success",
+      "name": "Lint (ruff + hadolint)",       "conclusion": "success",
+      "name": "Secret scan (gitleaks)",       "conclusion": "success",
+```
+
+And the 7 names the ruleset requires (same names, matched as text):
+
+```bash
+curl -s https://api.github.com/repos/valinfernanda/devops-project/rules/branches/main | grep -o '"context": *"[^"]*"'
+```
+```
+"context": "Lint (ruff + hadolint)"
+"context": "Secret scan (gitleaks)"
+"context": "Dependency scan (Trivy fs)"
+"context": "Tests (unit + integration)"
+"context": "Build, scan & publish image"
+"context": "Analyze (python)"
+"context": "Analyze (actions)"
+```
+
+### Who does this in a real team?
+
+Writing the workflows, choosing the tools, pinning versions and maintaining the ruleset is **DevOps / platform**
+work. Programmers mostly *use* it: they open PRs, read why a check is red ([02-ci.md Step 2.14](02-ci.md#step-214-reading-ci-results-where-to-click-when-something-is-red-)),
+fix it, and push again. Programmers also write **tests** (new pytest files), and the existing `test` job picks
+them up automatically, so adding a test needs no workflow change.
