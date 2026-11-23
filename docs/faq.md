@@ -278,3 +278,268 @@ git ls-remote --heads origin my-branch     # prints a line → the branch IS on 
 curl -s "https://api.github.com/repos/<you>/<repo>/pulls?head=<you>:my-branch" | grep '"number"'
                                             # prints nothing → no PR yet
 ```
+
+### ⚠️ The opposite trap: pushing to a branch whose PR is ALREADY merged
+
+Real case (PR #5): the PR was squash-merged and its branch deleted. A few minutes later one more commit (FAQ Q14)
+was pushed to the same branch name. What happened:
+
+1. `git push` silently **re-created** the deleted branch on GitHub, with the new commit on it.
+2. The merged PR #5 does **not** pick up the new commit: a merged PR is closed forever, and the squash commit on
+   `main` contains only what was in the PR at merge time.
+3. So Q14 sat on a forgotten branch, not on `main`. The hint was in the push output: `Create a pull request for
+   'docs/github-handbook'`. If a PR were still open, GitHub wouldn't suggest creating one.
+
+**Fix:** start a fresh branch from the updated `main` and copy just that commit over:
+
+```bash
+git switch main && git pull --ff-only          # main now includes the squash of PR #5
+git switch -c docs/faq-q14                     # new branch, new name
+git cherry-pick 67dbb82                        # copy the stranded commit (hash from `git log docs/github-handbook`)
+git push -u origin docs/faq-q14                # → create a NEW PR (#6)
+```
+
+**Rule:** after a PR is merged, never push to its branch again. Every new change gets a **new branch from the
+updated `main`**. (Reusing the old branch also causes fake conflicts, because squash merging gives `main` a new
+commit that Git doesn't see as the same as the branch's commits.) Then delete the leftover branch on GitHub:
+*Code* tab → branch dropdown → **View all branches** → 🗑️ next to it.
+
+---
+
+## Q14. When I open a PR, CI runs a bunch of checks automatically. Where is that set up, and how do I change it?
+
+**Short answer:** two separate pieces work together. Neither one is "magic"; you can open both.
+
+| Piece | Where it lives | What it decides | Who changes it |
+|---|---|---|---|
+| **① Workflow files** | In the repo: `.github/workflows/ci.yml`, `codeql.yml` | **WHAT** runs and **WHEN** (which jobs, which commands, on which events) | Anyone, via a PR (it's code) |
+| **② Ruleset** `protect-main` | GitHub **Settings → Rules → Rulesets** (not in the repo) | **WHICH** of those checks must be ✅ before the Merge button works | Repo admin (you), by clicking |
+
+Without ①, nothing runs. Without ②, checks still run, but a red ❌ is only *advice*: you could still click Merge.
+
+### How it flows when you open a PR
+
+```mermaid
+flowchart TD
+    A["You click 'Create pull request'<br/>(or push a new commit to the PR's branch)"] --> B["GitHub fires the event: pull_request"]
+    B --> C["GitHub reads every file in .github/workflows/<br/>from the PR's branch"]
+    C --> D{"Does the file say<br/>on: pull_request ?"}
+    D -->|"ci.yml: yes"| E["Starts jobs on fresh Ubuntu VMs (runners)"]
+    D -->|"codeql.yml: yes"| E
+    E --> F["Each job reports a CHECK<br/>named after its 'name:' line<br/>e.g. 'Tests (unit + integration)' ✅/❌"]
+    F --> G{"Ruleset protect-main:<br/>are all 7 REQUIRED checks ✅<br/>and is the branch up to date?"}
+    G -->|no| H["Merge button blocked<br/>'Required statuses must pass'"]
+    G -->|yes| I["Merge button enabled ✅"]
+```
+
+### Piece ①: the workflow file (what runs, and when)
+
+The top of `.github/workflows/ci.yml`, with comments added:
+
+```yaml
+name: CI                     # the workflow's name (shown in the Actions tab)
+
+on:                          # WHEN: the events that start this workflow
+  pull_request:              #  → every PR opened / every new commit pushed to a PR   ← this is why CI runs on your PR
+  push:
+    branches: [main]         #  → every push to main (= every merge); this run also publishes the image
+  workflow_dispatch:         #  → a manual "Run workflow" button in the Actions tab
+
+jobs:                        # WHAT: each job = one check on the PR
+  lint:                      # job id (used in 'needs:')
+    name: Lint (ruff + hadolint)   # ← THIS text is the check name you see on the PR and in the ruleset
+    runs-on: ubuntu-24.04          # a fresh virtual machine from GitHub, deleted afterwards
+    steps:
+      - uses: actions/checkout@<sha>               # download the PR's code onto the VM
+      - run: ruff check --output-format=github .   # the actual command; exit code ≠ 0 → check ❌
+  test:
+    name: Tests (unit + integration)
+    needs: lint              # order: only starts after lint is green
+    ...
+```
+
+**The one rule that decides ✅ or ❌:** every `run:` line is a shell command. Exit code `0` = pass; any other exit
+code = the step fails → the job fails → that check is ❌ on the PR. Tools like ruff, pytest, gitleaks and Trivy are
+"checks" simply because they exit with an error when they find a problem.
+
+Our current checks and where each one comes from:
+
+| Check name on the PR | File → job id | What it checks | Phase 2 step |
+|---|---|---|---|
+| `Lint (ruff + hadolint)` | ci.yml → `lint` | Python style/bugs, Dockerfile best practices | 2.2, 2.3 |
+| `Secret scan (gitleaks)` | ci.yml → `secrets` | Passwords/keys in any commit, whole history | 2.4 |
+| `Dependency scan (Trivy fs)` | ci.yml → `dependency-scan` | Known CVEs in `requirements*.txt` | 2.5 |
+| `Tests (unit + integration)` | ci.yml → `test` | 12 pytest tests against a real PostgreSQL | 2.7 |
+| `Build, scan & publish image` | ci.yml → `build` | Image builds; Trivy finds no fixable HIGH/CRITICAL; pushes to GHCR **only on main** | 2.5, 2.7 |
+| `Analyze (python)` | codeql.yml → `analyze` (matrix) | SAST: SQL injection etc. in app code | 2.8 |
+| `Analyze (actions)` | codeql.yml → `analyze` (matrix) | Insecure workflow files | 2.8 |
+
+> Dependabot (`.github/dependabot.yml`) is **not** a check. It's a robot that *opens* PRs (like #1), and those PRs
+> then go through the same checks.
+
+> **Why does the PR show 9 checks, not 7?** Two extra ones, named **`Trivy`** and **`CodeQL`**, come from GitHub's
+> *Code scanning* feature, not from a job of ours. Our jobs upload their findings (the SARIF file in `build`, and
+> CodeQL's results), and GitHub posts one summary check per tool: "did this PR add new security alerts?". They're
+> useful to look at, but they're **not** in the ruleset, so they don't block merging. Seen for real on PR #6:
+> `Trivy ✅`, `CodeQL ✅` plus our 7.
+
+### Piece ②: the ruleset (which checks are required)
+
+Click path: repo → **Settings** → left sidebar *Code and automation* → **Rules → Rulesets** → `protect-main` →
+**Require status checks to pass** → the list of 7 names. Full setup: [02-ci.md Step 2.11](02-ci.md#step-211--branch-protection-with-a-ruleset-).
+
+The ruleset only knows check **names** (plain text). It doesn't know what a check does; it just waits until a check
+with exactly that name reports ✅.
+
+### Recipe: adding a NEW check (example: lint the shell scripts with ShellCheck)
+
+*Example only, not added to this project yet.*
+
+1. Branch: `git switch -c ci/shellcheck`
+2. Add a job to `.github/workflows/ci.yml` under `jobs:`:
+   ```yaml
+     shellcheck:
+       name: ShellCheck (scripts)
+       runs-on: ubuntu-24.04
+       steps:
+         - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+         - run: docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:v0.10.0 scripts/*.sh
+   ```
+   (Optional: add `shellcheck` to `build`'s `needs:` if the image build should wait for it.)
+3. Try the same command locally first (inside WSL), then commit, push, and **create the PR**.
+4. The PR now shows an **8th** check, `ShellCheck (scripts)`. It runs, but it's **not required** yet: even if it's ❌,
+   you could still merge.
+5. Merge the PR once green.
+6. Make it required: Settings → Rules → Rulesets → `protect-main` → *Require status checks* → **Add checks** →
+   type `ShellCheck` → select it → **Save changes**. (A check only shows up in that search after it has run at least
+   once in the last 7 days. That's why steps 3–5 come first.)
+7. Verify:
+   ```bash
+   curl -s https://api.github.com/repos/valinfernanda/devops-project/rules/branches/main | grep -o '"context": *"[^"]*"'
+   ```
+
+### Changing or removing a check
+
+| You want to… | Do this | Watch out |
+|---|---|---|
+| Change what a check does | Edit the job's `steps:` in a PR | The edit itself must pass CI to merge |
+| **Rename** a check | Change `name:` **and** update the ruleset to the new name | ⚠️ If you forget the ruleset, every PR waits forever: *"Expected — Waiting for status to be reported"* |
+| Remove a check | Remove it from the ruleset **first**, then delete the job | Same "waiting forever" trap if you do it the other way round |
+| Run a check only when some files change | `on: pull_request: paths: ['app/**']` | ⚠️ If that check is **required** and a PR doesn't touch `app/`, it never runs → the PR is stuck. Don't put `paths:` on required checks |
+| Run CI by hand | Actions tab → **CI** → **Run workflow** (thanks to `workflow_dispatch`) | — |
+
+### See which checks ran on a commit, from the terminal
+
+```bash
+curl -s https://api.github.com/repos/valinfernanda/devops-project/commits/0e03036/check-runs \
+  | grep -E '^      "(name|conclusion)"' | paste - -
+```
+
+Real output (main commit `0e03036`, duplicates removed):
+
+```
+      "name": "Analyze (actions)",            "conclusion": "success",
+      "name": "Analyze (python)",             "conclusion": "success",
+      "name": "Build, scan & publish image",  "conclusion": "success",
+      "name": "Tests (unit + integration)",   "conclusion": "success",
+      "name": "Dependency scan (Trivy fs)",   "conclusion": "success",
+      "name": "Lint (ruff + hadolint)",       "conclusion": "success",
+      "name": "Secret scan (gitleaks)",       "conclusion": "success",
+```
+
+And the 7 names the ruleset requires (same names, matched as text):
+
+```bash
+curl -s https://api.github.com/repos/valinfernanda/devops-project/rules/branches/main | grep -o '"context": *"[^"]*"'
+```
+```
+"context": "Lint (ruff + hadolint)"
+"context": "Secret scan (gitleaks)"
+"context": "Dependency scan (Trivy fs)"
+"context": "Tests (unit + integration)"
+"context": "Build, scan & publish image"
+"context": "Analyze (python)"
+"context": "Analyze (actions)"
+```
+
+### Who does this in a real team?
+
+Writing the workflows, choosing the tools, pinning versions and maintaining the ruleset is **DevOps / platform**
+work. Programmers mostly *use* it: they open PRs, read why a check is red ([02-ci.md Step 2.14](02-ci.md#step-214-reading-ci-results-where-to-click-when-something-is-red-)),
+fix it, and push again. Programmers also write **tests** (new pytest files), and the existing `test` job picks
+them up automatically, so adding a test needs no workflow change.
+
+---
+
+## Q15. What are the `#1`, `#2` … `#6` numbers?
+
+They are **issue / pull request numbers**. Every repo has **one counter**, and each new **issue** or **pull
+request** gets the next number from it: 1, 2, 3… A number is never reused, even after the PR is closed or merged.
+It's the PR's permanent ID.
+
+Our repo so far (real data from the GitHub API):
+
+| # | What it is | Who opened it | State |
+|---|---|---|---|
+| #1 | `build(deps): Bump python from 3.13 to 3.15 in /app` | Dependabot (robot) | 🟢 Open (not merged on purpose) |
+| #2 | `Add task search endpoint` | you | 🟣 Merged |
+| #3 | `docs: Phase 2 complete (ruleset, vulnerable-PR experiment, summary)` | you | 🟣 Merged |
+| #4 | `Docs/pr workflow` | you | 🟣 Merged |
+| #5 | `Docs/GitHub handbook` | you | 🟣 Merged |
+| #6 | `Docs/faq q14` | you | (this FAQ entry's own PR) |
+
+> If you create an **Issue** next, it becomes **#7**: issues and PRs share the same counter. That's why in big
+> repos PR numbers sometimes "jump" (e.g. #41 → #45): the numbers in between went to issues.
+
+### What the number is used for
+
+**1. The PR's address.** `#6` = <https://github.com/valinfernanda/devops-project/pull/6>. Short, permanent, easy
+to say: "please review #6".
+
+**2. Linking a commit on `main` back to its PR.** With *Squash and merge*, GitHub adds `(#N)` to the end of
+the commit title:
+
+```
+$ git log --oneline main
+5618b63 Docs/GitHub handbook (#5)          ← this commit came from PR #5
+0e03036 Docs/pr workflow (#4)
+da96f59 docs: Phase 2 complete (ruleset, vulnerable-PR experiment, summary) (#3)
+2c0c748 Add task search endpoint (#2)
+2e9f220 docs: Phase 2 first CI run results, …   ← no (#N): pushed directly, before main was protected
+21292e7 Phase 2: CI pipeline with GitHub Actions
+```
+
+On GitHub, `(#5)` in a commit title is a **clickable link** to the PR. That's why `(#N)` matters in real teams:
+from any line of code you can go `git blame` → commit → `(#N)` → the PR, and see **why** the change was made,
+the review discussion, and the CI results. (The last two commits have no number because they were pushed straight
+to `main` in Phase 2, before the ruleset existed. Today that's impossible.)
+
+**3. Auto-links anywhere on GitHub.** Typing `#5` in a PR description, issue or comment turns into a link with a
+preview. Another repo: `owner/repo#5`.
+
+**4. Closing issues automatically.** If a PR description says `Fixes #7` (or `Closes #7`, `Resolves #7`), merging
+the PR **closes issue #7 automatically**. That's the standard programmer workflow: issue → branch → PR "Fixes #7" → merge.
+
+**5. DevOps uses.** Release notes are generated from PR titles and numbers (*Releases → Generate release notes*
+lists "Add task search endpoint by @you in #2"). Preview environments are named by number (`pr-6.example.com`).
+Incident reports say "broke in #42, rolled back by reverting #42".
+
+### Number vs hash: don't mix them up
+
+| | `#5` | `5618b63` |
+|---|---|---|
+| What | Pull request (a *conversation*: title, description, commits, checks, review) | One **commit** (a snapshot of the files) |
+| Made by | GitHub | Git |
+| Exists in Git itself? | ❌ only on GitHub (Git just sees the text "(#5)" in a message) | ✅ |
+| Example | `/pull/5` | `git show 5618b63` |
+
+### Find things by number from the terminal
+
+```bash
+git log --oneline --grep "#5"                                          # which commit on main came from PR #5?
+curl -s https://api.github.com/repos/valinfernanda/devops-project/pulls/5 | grep -E '"(title|merged_at)"'
+```
+
+> 💡 The auto-generated squash titles (`Docs/pr workflow`, `Docs/faq q14`) come from the **branch name**.
+> GitHub turns `docs/faq-q14` into "Docs/faq q14". Edit the title in the merge box to a real sentence, e.g.
+> `docs(faq): explain PR checks and #numbers (#6)`. That title is what stays in `git log` forever.

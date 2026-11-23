@@ -106,6 +106,7 @@ Updated every phase.
 | **Profile** (Compose) | A group of services only started when asked (`tests`, `test-db`) | P1 1.10 |
 | **Prune** (Docker) | Delete unused containers/images/cache | P0 0.2b |
 | **Pull request (PR)** | A GitHub request to merge a branch, with review + CI checks | Git §6, P2 2.13 |
+| **PR number** (`#6`) | Permanent ID of an issue/PR; one counter per repo shared by issues and PRs. Squash merge adds `(#6)` to the commit title, linking it back to the PR | FAQ Q15 |
 | **Push / pull / fetch** | Upload commits / download + update / download only | Git §5 |
 | **Rebase** | Replay your commits on top of another branch (straight history) | HB 2.3, 2.5 |
 | **Release** (GitHub) | A version (tag) with notes and downloads | HB D4 |
