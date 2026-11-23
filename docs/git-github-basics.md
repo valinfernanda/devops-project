@@ -4,6 +4,8 @@
 > (commits, branches, pushes, pull requests, merges, protected branches) makes sense, not just "type this".
 >
 > **Read this before Phase 2's PR steps.** Every command here is one we really used in this project.
+>
+> **Next:** [github-handbook.md](github-handbook.md): real outputs (fetch vs pull, conflicts, undo), every GitHub feature, programmer + DevOps cases.
 
 ---
 

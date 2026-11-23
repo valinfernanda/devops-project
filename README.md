@@ -16,6 +16,7 @@ we made along the way. Suggested order:
 |---|---|---|
 | 1 | [docs/glossary.md](docs/glossary.md) | Keep it open in a second tab: every technical word, in plain English |
 | 2 | [docs/git-github-basics.md](docs/git-github-basics.md) | Git, branches, pull requests, merging, from zero (+ 4 practice exercises) |
+| 2b | [docs/github-handbook.md](docs/github-handbook.md) | Real outputs (fetch vs pull, conflicts, undo…), every GitHub feature, programmer + DevOps cases |
 | 3 | [docs/00-setup.md](docs/00-setup.md) | Phase 0: prepare the laptop |
 | 4 | [docs/01-app-docker.md](docs/01-app-docker.md) | Phase 1: the app, Docker, Compose |
 | 5 | [docs/02-ci.md](docs/02-ci.md) | Phase 2: CI, security scans, branch protection, PR workflow |
@@ -124,12 +125,14 @@ devops-project/
 │   └── tests/             ← unit + integration tests
 ├── scripts/
 │   ├── 00-install-tools.sh   ← installs kubectl, kind, terraform, helm, ansible, k9s
-│   └── ci-local.sh           ← runs the CI checks locally before you push
+│   ├── ci-local.sh           ← runs the CI checks locally before you push
+│   └── git-playground.sh     ← safe Git sandbox: replays every handbook example
 └── docs/                  ← one detailed guide per phase
     ├── 00-setup.md
     ├── 01-app-docker.md
     ├── 02-ci.md
     ├── git-github-basics.md ← Git & GitHub from zero (+ exercises)
+    ├── github-handbook.md ← real outputs, every GitHub feature, programmer + DevOps cases
     ├── glossary.md        ← every term, plain English
     ├── faq.md             ← questions & answers from the journey
     └── images/            ← screenshots used in the guides
