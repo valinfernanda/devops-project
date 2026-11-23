@@ -279,6 +279,31 @@ curl -s "https://api.github.com/repos/<you>/<repo>/pulls?head=<you>:my-branch" |
                                             # prints nothing → no PR yet
 ```
 
+### ⚠️ The opposite trap: pushing to a branch whose PR is ALREADY merged
+
+Real case (PR #5): the PR was squash-merged and its branch deleted. A few minutes later one more commit (FAQ Q14)
+was pushed to the same branch name. What happened:
+
+1. `git push` silently **re-created** the deleted branch on GitHub, with the new commit on it.
+2. The merged PR #5 does **not** pick up the new commit: a merged PR is closed forever, and the squash commit on
+   `main` contains only what was in the PR at merge time.
+3. So Q14 sat on a forgotten branch, not on `main`. The hint was in the push output: `Create a pull request for
+   'docs/github-handbook'`. If a PR were still open, GitHub wouldn't suggest creating one.
+
+**Fix:** start a fresh branch from the updated `main` and copy just that commit over:
+
+```bash
+git switch main && git pull --ff-only          # main now includes the squash of PR #5
+git switch -c docs/faq-q14                     # new branch, new name
+git cherry-pick 67dbb82                        # copy the stranded commit (hash from `git log docs/github-handbook`)
+git push -u origin docs/faq-q14                # → create a NEW PR (#6)
+```
+
+**Rule:** after a PR is merged, never push to its branch again. Every new change gets a **new branch from the
+updated `main`**. (Reusing the old branch also causes fake conflicts, because squash merging gives `main` a new
+commit that Git doesn't see as the same as the branch's commits.) Then delete the leftover branch on GitHub:
+*Code* tab → branch dropdown → **View all branches** → 🗑️ next to it.
+
 ---
 
 ## Q14. When I open a PR, CI runs a bunch of checks automatically. Where is that set up, and how do I change it?
