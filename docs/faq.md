@@ -244,3 +244,37 @@ and [git-github-basics.md §4–6](git-github-basics.md).
 curl -s https://raw.githubusercontent.com/<you>/<repo>/main/docs/02-ci.md | grep "^## Step 2.13"
 ```
 No output = not on `main` yet.
+
+---
+
+## Q13. I opened the "Pull requests" tab and my branch isn't there. Why?
+
+Because **pushing a branch does NOT create a pull request.** The *Pull requests* tab only lists PRs that
+someone has **created**. A pushed branch with no PR is just a branch: it's on GitHub, but it isn't in that list.
+Real case: `docs/github-handbook` was pushed, but the list showed only Dependabot's PR #1.
+
+```mermaid
+flowchart LR
+    A["git push -u origin my-branch"] --> B["Branch exists on GitHub<br/>(Code tab → branch dropdown)"]
+    B -->|"YOU click 'Create pull request'"| C["PR #N exists<br/>(now visible in Pull requests tab)"]
+    C --> D["CI runs → green → Squash and merge"]
+```
+
+| What you did | Branch on GitHub? | In *Pull requests* tab? |
+|---|---|---|
+| `git push -u origin my-branch` | ✅ | ❌ |
+| Opened `/pull/new/my-branch` (the compare page) | ✅ | ❌ still a preview, no `#number` |
+| Clicked the green **Create pull request** button | ✅ | ✅ gets a `#number` |
+
+**How to create it** (any of these):
+1. Open `https://github.com/<you>/<repo>/pull/new/<branch>` → fill the title → click **Create pull request**.
+2. Or: repo page → yellow banner *"my-branch had recent pushes"* → **Compare & pull request** → **Create pull request**.
+3. Or: *Pull requests* tab → **New pull request** → set **base: `main`**, **compare: `my-branch`** → **Create pull request**.
+
+**Check from the terminal:**
+
+```bash
+git ls-remote --heads origin my-branch     # prints a line → the branch IS on GitHub
+curl -s "https://api.github.com/repos/<you>/<repo>/pulls?head=<you>:my-branch" | grep '"number"'
+                                            # prints nothing → no PR yet
+```
