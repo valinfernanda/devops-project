@@ -10,6 +10,37 @@
 
 ---
 
+## 🧭 Programmer or DevOps? How to read this phase
+
+Steps 1.1–1.6 are mostly **programmer work**: building the app itself. We had to build it ourselves, because
+a DevOps engineer needs a realistic app to containerize, test and deploy. **The DevOps core of this phase
+starts at Step 1.7 (the Dockerfile).** Before that, a few sections are still things DevOps must know well,
+because they are the app's **contract with the platform**. In a team, DevOps is often the one who *asks* for them.
+
+| Step | Owner | What a DevOps engineer takes from it |
+|---|---|---|
+| 1.1 Choose the app and the stack | 💻 Programmer | ⭐ **Must read: "Concept: the 12-factor app"**. Config in env vars, stateless, logs to stdout: DevOps relies on all of it (K8s ConfigMaps/Secrets, scaling, log collection) |
+| 1.2 Project layout | 💻 Programmer | Just know where things are |
+| 1.3 Write the application | 💻 Programmer | ⭐ **Must read: the endpoints table + "Concept: liveness vs readiness"**. `/health` and `/ready` become Kubernetes probes in Phase 3. DevOps defines this requirement |
+| 1.4 Database migrations (Alembic) | 🤝 Shared | Programmers **write** migrations. DevOps decides **when and how they run** (Compose `migrate` service now, a K8s Job / ArgoCD hook later). ⭐ Read *"Why not let the app create tables at startup?"* |
+| 1.5 Dependencies and lock files | 🤝 Shared | ⭐ Lock files = reproducible builds. Dependabot and Trivy (Phase 2) read these files |
+| 1.6 Tests | 💻 Programmer writes them | DevOps **runs** them automatically (Step 1.13 here, CI in Phase 2). Skim the unit vs integration concept |
+| **1.7 Naive Dockerfile** | 🛠️ **DevOps** ← *starts here* | Image layers, why a naive image is bad |
+| 1.8 Production multi-stage Dockerfile | 🛠️ DevOps | Multi-stage, non-root, pinned base image, HEALTHCHECK, `.dockerignore` |
+| 1.9 Naive vs production, measured | 🛠️ DevOps | Measure size, layers, user: prove the improvement |
+| 1.10 Docker Compose | 🛠️ DevOps | Whole stack in one file, startup order with healthchecks, volumes, `.env` secrets |
+| 1.11 Run and verify the API | 🛠️ DevOps | Smoke test after deploying + **"Logs: one stream, written to stdout"** |
+| 1.12 🧪 Database outage | 🛠️ DevOps | Proves liveness vs readiness for real. This is how you'd debug an incident |
+| 1.13 Tests in containers | 🛠️ DevOps | Isolated test database, the real bug where tests wiped dev data |
+| 1.14 🧪 Data persistence | 🛠️ DevOps | Named volumes: what survives `down`, what doesn't |
+
+**Fast DevOps reading path:** 1.1 (12-factor concept only) → 1.3 (endpoints + liveness/readiness only) →
+1.4 (the "why" box) → 1.5 → **1.7 to 1.14 in full**.
+
+Who owns what in general (DB schema, Dockerfile, pipelines…): see [FAQ Q10](faq.md).
+
+---
+
 ## Where are we now?
 
 ```mermaid
