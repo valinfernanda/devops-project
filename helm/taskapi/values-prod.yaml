@@ -1,0 +1,22 @@
+# PROD: more copies, autoscaling, protected during maintenance. Only the DIFFERENCES.
+#   helm upgrade --install taskapi helm/taskapi -n taskapi-prod -f helm/taskapi/values-prod.yaml
+app:
+  logLevel: info
+httpRoute:
+  hostname: taskapi.localhost
+resources:
+  requests: { cpu: 200m, memory: 192Mi }
+  limits: { memory: 384Mi }
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 10
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 2
+postgres:
+  storage: 5Gi
+  # On Azure (Phase 8) this becomes:
+  #   postgres.enabled: false
+  #   database.externalHost: <server>.postgres.database.azure.com
+  #   database.existingSecret: taskapi-db   (synced from Key Vault)

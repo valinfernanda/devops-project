@@ -1,0 +1,41 @@
+# APP layer: "send requests for taskapi.localhost to my Service".
+# Attaches to the shared Gateway "main" (k8s/platform/gateway.yaml).
+# Replaces the old Ingress resource (ingress-nginx was retired in March 2026).
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: taskapi
+  namespace: taskapi
+  labels:
+    app.kubernetes.io/name: taskapi
+    app.kubernetes.io/part-of: taskapi
+spec:
+  parentRefs:
+    - name: main
+      namespace: envoy-gateway-system
+  hostnames:
+    - taskapi.localhost        # *.localhost always resolves to 127.0.0.1: no hosts-file editing needed
+  rules:
+    - matches:
+        - path: { type: PathPrefix, value: / }
+      backendRefs:
+        - name: taskapi        # the Service from 40-api.yaml
+          port: 80
+---
+# Envoy-specific traffic settings for the route above.
+# By default, when NO pod is ready, Envoy enters "panic mode" and sends traffic to the
+# not-ready pods anyway (designed for flaky health checks). In our DB-outage experiment
+# that meant requests reached a pod with no database → HTTP 500 from the app.
+# panicThreshold: 0 disables panic mode: not ready = no traffic → a fast, honest 503.
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: BackendTrafficPolicy
+metadata:
+  name: taskapi
+  namespace: taskapi
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: taskapi
+  healthCheck:
+    panicThreshold: 0

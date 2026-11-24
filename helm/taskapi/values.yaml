@@ -1,0 +1,65 @@
+# =============================================================================
+# Default values for the taskapi chart. Every key here can be overridden:
+#   helm install taskapi helm/taskapi -f helm/taskapi/values-dev.yaml   (a file)
+#   helm install taskapi helm/taskapi --set replicaCount=3               (one key)
+# Later sources win: values.yaml < -f file(s) in order < --set
+# =============================================================================
+
+image:
+  repository: ghcr.io/valinfernanda/taskapi
+  tag: ""                    # empty → use the chart's appVersion (Chart.yaml)
+  pullPolicy: IfNotPresent
+
+replicaCount: 2              # ignored when autoscaling.enabled is true
+
+app:
+  logLevel: info
+
+# --- HTTP exposure through the shared Gateway (k8s/platform/gateway.yaml) -----
+httpRoute:
+  enabled: true
+  hostname: taskapi.localhost
+  gateway:
+    name: main
+    namespace: envoy-gateway-system
+  disablePanicMode: true     # see Step 3.8 E: not ready → 503, never route to broken pods
+
+resources:
+  requests: { cpu: 100m, memory: 128Mi }
+  limits: { memory: 256Mi }
+
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 6
+  targetCPUUtilizationPercentage: 50
+
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1            # during node maintenance, keep at least 1 pod running
+
+# --- Database ------------------------------------------------------------------
+database:
+  name: taskapi
+  user: taskapi
+  # Name of an EXISTING Secret with key "password". Empty → the chart creates one with a
+  # random password (and keeps it across upgrades). In real prod the Secret would come
+  # from a vault (Azure Key Vault + External Secrets, Phase 8).
+  existingSecret: ""
+  # Host of an EXTERNAL database (e.g. Azure Database for PostgreSQL). Used only when
+  # postgres.enabled is false.
+  externalHost: ""
+  port: 5432
+
+# In-cluster PostgreSQL (StatefulSet). Fine for learning and dev; prod usually uses a
+# managed database instead (set enabled: false + database.externalHost).
+postgres:
+  enabled: true
+  image: postgres:17-alpine
+  storage: 1Gi
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { memory: 512Mi }
+
+migrations:
+  enabled: true              # run "alembic upgrade head" as a Helm hook Job

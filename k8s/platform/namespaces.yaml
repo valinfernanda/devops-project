@@ -1,0 +1,21 @@
+# Namespaces for the Helm releases (Step 3.9). Created by the PLATFORM side (DevOps), not
+# by the chart: the security policy and the gateway permission are cluster decisions,
+# not something an app chart should be able to switch off for itself.
+# (`helm install --create-namespace` would create a namespace WITHOUT these labels.)
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: taskapi-dev
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/warn: restricted
+    gateway-access: "true"
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: taskapi-prod
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/warn: restricted
+    gateway-access: "true"
