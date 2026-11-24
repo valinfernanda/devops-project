@@ -1,0 +1,24 @@
+# ConfigMap = NON-secret settings, injected into pods as environment variables.
+# Same APP_* variables the app already reads (12-factor, factor III), just delivered
+# the Kubernetes way instead of through compose.yaml / .env.
+#
+# The database PASSWORD is NOT here: it lives in a Secret (created with kubectl, never
+# committed). See Step 3.3 in docs/03-kubernetes-helm.md.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: taskapi-config
+  namespace: taskapi
+  labels:
+    app.kubernetes.io/part-of: taskapi
+data:
+  APP_LOG_LEVEL: "info"
+  POSTGRES_DB: "taskapi"
+  POSTGRES_USER: "taskapi"
+  # The database Service's DNS name, FULLY QUALIFIED with a trailing dot.
+  # The short name "postgres" also works, but when the database is down each lookup walks
+  # the whole DNS search list (ndots:5) and took 4 s → the readiness probe timed out.
+  # The trailing dot means "this is the complete name": one lookup, instant answer.
+  # (Real finding from the DB-outage experiment, Step 3.8 E.)
+  DB_HOST: "postgres.taskapi.svc.cluster.local."
+  DB_PORT: "5432"

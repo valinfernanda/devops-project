@@ -35,6 +35,8 @@ Updated every phase.
 | **Context** (kubeconfig) | A named "which cluster + which user" pair that `kubectl` talks to | P0 0.6 |
 | **Control plane** | The "brain" of Kubernetes: API server, scheduler, etcd, controllers | P0 0.6 |
 | **CVE** | A public ID for a known security vulnerability | P2 2.5 |
+| **ConfigMap** | Kubernetes object holding NON-secret settings, injected into pods as env vars or files | P3 3.3 |
+| **CrashLoopBackOff** | Pod status: the container keeps crashing, Kubernetes waits longer before each restart | P3 3.1 |
 
 ## D–H
 
@@ -70,6 +72,14 @@ Updated every phase.
 | **Health check** | A periodic test that a container is working (`/health`) | P1 1.8 |
 | **Helm** | Package manager for Kubernetes (Phase 3) | P0 0.4 |
 | **Hyper-V** | Windows' built-in virtualization; minikube's old VM used it | P0 0.2c |
+| **Deployment** | Kubernetes object that keeps N identical pods running and rolls out new versions | P3 3.6 |
+| **DNS search list / `ndots`** | Short names (`postgres`) are tried with each suffix in `/etc/resolv.conf` first; can be slow when the name doesn't exist. A trailing dot (`postgres.ns.svc.cluster.local.`) skips it | P3 3.8 E |
+| **EndpointSlice** | The live list of pod IPs behind a Service, each marked ready or not | P3 3.6 |
+| **Envoy / Envoy Gateway** | Envoy = a fast proxy; Envoy Gateway = runs Envoy as the cluster's Gateway API implementation | P3 3.7 |
+| **Gateway API** (`GatewayClass`, `Gateway`, `HTTPRoute`) | The modern Kubernetes way to route outside traffic into the cluster; successor of Ingress | P3 3.7 |
+| **Helm chart / release / values** | Chart = templated package of manifests; release = one installed copy; values = the settings filled into the templates | P3 3.9 |
+| **Helm hook** | A template Helm runs at a specific moment (e.g. `pre-upgrade`), used for migrations and tests | P3 3.9 |
+| **HPA** (HorizontalPodAutoscaler) | Adds/removes pods automatically based on CPU (or other) usage | P3 3.8 G |
 
 ## I–N
 
@@ -92,6 +102,14 @@ Updated every phase.
 | **Named volume** | Docker-managed storage that survives container removal (`db-data`) | P1 1.14 |
 | **Node** (Kubernetes) | A machine (VM, or a container in kind) that runs pods | P0 0.6 |
 | **Non-root user** | Running the app as an unprivileged user (UID 10001), not as root | P1 1.8 |
+| **ImagePullBackOff** | Pod status: the image can't be downloaded (wrong tag, private registry…); Kubernetes keeps retrying | P3 3.8 D |
+| **Ingress / ingress-nginx** | The older way to route HTTP into a cluster; the popular ingress-nginx controller was retired in March 2026 | P3 3.7 |
+| **Init container** | A container that runs to completion BEFORE the main containers start (e.g. wait for the database) | P3 3.5 |
+| **Job** | Kubernetes object that runs a pod until it succeeds once (migrations, batch work) | P3 3.5 |
+| **Manifest** | A YAML file describing Kubernetes objects; `kubectl apply -f` sends it to the cluster | P3 3.3 |
+| **metrics-server** | Cluster add-on that collects CPU/memory per pod; needed by `kubectl top` and the HPA | P3 3.8 G |
+| **Namespace** (Kubernetes) | A "folder" inside the cluster that groups and isolates objects | P3 3.3 |
+| **NodePort** | A Service type that opens the same port (30000–32767) on every node | P3 3.7 |
 
 ## O–R
 
@@ -116,6 +134,15 @@ Updated every phase.
 | **Repository (repo)** | A project tracked by Git (locally and on GitHub) | Git §1 |
 | **ruff** | Fast Python linter + formatter | P2 2.2 |
 | **Runner** | The fresh VM GitHub lends to run a CI job | P2 2.1 |
+| **OOMKilled** | The container used more memory than its limit and was killed | P3 3.6 |
+| **Panic mode** (Envoy) | When too few backends are healthy, Envoy ignores health and sends traffic to all of them; we turned it off | P3 3.8 E |
+| **PersistentVolume (PV) / Claim (PVC)** | PV = a piece of storage; PVC = a pod's request for storage, bound to a PV | P3 3.4 |
+| **Pod Security Admission** | Built-in check that rejects pods breaking a security level (`restricted` = non-root, no privileges…) | P3 3.3 |
+| **PodDisruptionBudget** | "Keep at least N pods running" during voluntary disruptions like node drains | P3 3.9 |
+| **Port-forward** | `kubectl port-forward`: a temporary tunnel from your laptop to a pod/Service, for debugging | P3 3.6 |
+| **ReplicaSet** | Created by a Deployment; keeps a fixed number of pods of ONE version. One per rollout revision | P3 3.8 C |
+| **Requests / limits** | Request = CPU/RAM reserved for scheduling; limit = hard maximum | P3 3.6 |
+| **Rollout / rollback** | Rollout = replacing pods with a new version step by step; rollback (`rollout undo`) = go back to the previous one | P3 3.8 C–D |
 
 ## S–Z
 
@@ -148,3 +175,10 @@ Updated every phase.
 | **`.vhdx`** | A virtual hard disk file (Docker Desktop and WSL store data in one) | P0 0.2 |
 | **Workflow** (Actions) | A YAML file in `.github/workflows/` describing a pipeline | P2 2.1 |
 | **WSL2** | Windows Subsystem for Linux: a real Linux (Ubuntu) inside Windows | P0 0.3 |
+| **Secret** (Kubernetes) | Like a ConfigMap but for sensitive values (base64-encoded, not encrypted by default) | P3 3.3 |
+| **Self-healing** | Kubernetes constantly compares desired vs actual state and replaces missing/crashed pods | P3 3.8 A |
+| **Service** (Kubernetes) | A stable name + IP in front of a changing set of pods, load-balancing between them | P3 3.6 |
+| **StatefulSet** | Like a Deployment but for stateful apps: stable pod names and one disk per pod | P3 3.4 |
+| **StorageClass** | Describes HOW volumes are created (kind: `standard` = a folder on the node) | P3 3.4 |
+| **Startup probe** | Gives a slow app time to boot; liveness/readiness checks wait until it passes | P3 3.6 |
+| **Topology spread** | Rule to spread pods across nodes so one node failure doesn't take all copies | P3 3.6 |

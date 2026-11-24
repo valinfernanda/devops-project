@@ -1,0 +1,65 @@
+# Database migrations as a Job: "run this container once until it succeeds".
+# The Kubernetes version of compose's one-off "migrate" service.
+#
+# A Job's pod template can't be changed after creation. To run migrations again
+# (new image version), delete the Job and apply it again:
+#   kubectl -n taskapi delete job taskapi-migrate --ignore-not-found
+#   kubectl apply -f k8s/manifests/30-migrate-job.yaml
+# Helm (Step 3.9) automates this with a "hook".
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: taskapi-migrate
+  namespace: taskapi
+  labels:
+    app.kubernetes.io/name: taskapi
+    app.kubernetes.io/component: migrate
+    app.kubernetes.io/part-of: taskapi
+spec:
+  backoffLimit: 4                # retry up to 4 times (new pod each time) before "Failed"
+  activeDeadlineSeconds: 300     # give up completely after 5 minutes
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: taskapi
+        app.kubernetes.io/component: migrate
+    spec:
+      restartPolicy: Never       # a failed try = a new pod (easier to read logs per try)
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: { type: RuntimeDefault }
+      # initContainers run BEFORE the main container, in order, each until it exits 0.
+      # This one waits for the database (like compose's "depends_on: service_healthy").
+      initContainers:
+        - name: wait-for-db
+          image: postgres:17-alpine            # only for its pg_isready tool
+          command: ["sh", "-c", "until pg_isready -h \"$DB_HOST\" -p \"$DB_PORT\"; do echo waiting for db; sleep 2; done"]
+          envFrom:
+            - configMapRef: { name: taskapi-config }
+          securityContext:
+            runAsUser: 70
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits:   { memory: 32Mi }
+      containers:
+        - name: migrate
+          image: ghcr.io/valinfernanda/taskapi:sha-2273a31   # SAME image as the API (Step 3.6)
+          command: ["alembic", "upgrade", "head"]
+          envFrom:
+            - configMapRef: { name: taskapi-config }
+          env:
+            - name: DB_PASSWORD
+              valueFrom: { secretKeyRef: { name: taskapi-db, key: password } }
+            # $(VAR) = Kubernetes fills in variables defined EARLIER in this pod (envFrom + env above).
+            - name: APP_DATABASE_URL
+              value: "postgresql+psycopg://$(POSTGRES_USER):$(DB_PASSWORD)@$(DB_HOST):$(DB_PORT)/$(POSTGRES_DB)"
+          securityContext:
+            runAsUser: 10001
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits:   { memory: 256Mi }

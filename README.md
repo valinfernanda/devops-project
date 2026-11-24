@@ -20,6 +20,7 @@ we made along the way. Suggested order:
 | 3 | [docs/00-setup.md](docs/00-setup.md) | Phase 0: prepare the laptop |
 | 4 | [docs/01-app-docker.md](docs/01-app-docker.md) | Phase 1: the app, Docker, Compose |
 | 5 | [docs/02-ci.md](docs/02-ci.md) | Phase 2: CI, security scans, branch protection, PR workflow |
+| 6 | [docs/03-kubernetes-helm.md](docs/03-kubernetes-helm.md) | Phase 3: Kubernetes by hand, 7 experiments, then a Helm chart |
 | ➕ | [docs/faq.md](docs/faq.md) | Every question asked along the way (Azure or not? what is kind? who owns the DB? …) |
 
 **How to use each guide:**
@@ -72,6 +73,7 @@ flowchart LR
 | Infrastructure as Code | Terraform | Terraform against Azure |
 | Configuration management | Ansible + local VMs (Multipass) | Azure VMs |
 | Kubernetes packaging | Helm | — |
+| Traffic into the cluster | Gateway API + Envoy Gateway | Azure Application Gateway for Containers |
 | CI | GitHub Actions | Azure DevOps Pipelines |
 | CD / GitOps | ArgoCD | — |
 | Registry | GHCR (GitHub Container Registry) | ACR |
@@ -83,7 +85,7 @@ flowchart LR
 - [x] **Phase 0: Workstation setup** → [docs/00-setup.md](docs/00-setup.md) ✅
 - [x] **Phase 1: Application + Docker** → [docs/01-app-docker.md](docs/01-app-docker.md) ✅
 - [x] **Phase 2: CI with GitHub Actions** → [docs/02-ci.md](docs/02-ci.md) ✅
-- [ ] Phase 3: Kubernetes basics → intermediate + Helm
+- [x] **Phase 3: Kubernetes + Helm** → [docs/03-kubernetes-helm.md](docs/03-kubernetes-helm.md) ✅
 - [ ] Phase 4: Terraform (cluster and add-ons as code)
 - [ ] Phase 5: Ansible (provision VMs + install k3s)
 - [ ] Phase 6: CD / GitOps with ArgoCD
@@ -105,6 +107,15 @@ docker compose run --rm tests        # 12 tests, own throwaway database
 
 API docs: <http://localhost:8000/docs>
 
+## Quick start on Kubernetes (inside WSL Ubuntu)
+
+```bash
+bash scripts/k8s-up.sh prod                       # kind cluster + Envoy Gateway + metrics-server + dev & prod releases
+curl http://taskapi-dev.localhost:8090/health     # dev
+curl http://taskapi.localhost:8090/health         # prod
+kind delete cluster --name devops-lab             # throw it all away
+```
+
 ## Folder structure (grows each phase)
 
 ```
@@ -118,6 +129,11 @@ devops-project/
 │   ├── workflows/ci.yml   ← CI: lint, scans, tests, build, push to GHCR
 │   ├── workflows/codeql.yml ← SAST for Python + workflow files
 │   └── dependabot.yml     ← weekly dependency update PRs
+├── k8s/
+│   ├── kind-cluster.yaml  ← local 3-node Kubernetes cluster
+│   ├── platform/          ← shared front door (Gateway) + namespaces (DevOps-owned)
+│   └── manifests/         ← the app as plain Kubernetes YAML, written by hand
+├── helm/taskapi/          ← the same app as a Helm chart (values-dev / values-prod)
 ├── app/                   ← Task API (FastAPI + PostgreSQL)
 │   ├── Dockerfile         ← production multi-stage image (311 MB, non-root)
 │   ├── taskapi/           ← application code
@@ -131,6 +147,7 @@ devops-project/
     ├── 00-setup.md
     ├── 01-app-docker.md
     ├── 02-ci.md
+    ├── 03-kubernetes-helm.md
     ├── git-github-basics.md ← Git & GitHub from zero (+ exercises)
     ├── github-handbook.md ← real outputs, every GitHub feature, programmer + DevOps cases
     ├── glossary.md        ← every term, plain English

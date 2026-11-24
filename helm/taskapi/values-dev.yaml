@@ -1,0 +1,9 @@
+# DEV: small, cheap, chatty logs. Only the DIFFERENCES from values.yaml.
+#   helm upgrade --install taskapi helm/taskapi -n taskapi-dev -f helm/taskapi/values-dev.yaml
+replicaCount: 1
+app:
+  logLevel: debug
+httpRoute:
+  hostname: taskapi-dev.localhost
+postgres:
+  storage: 1Gi

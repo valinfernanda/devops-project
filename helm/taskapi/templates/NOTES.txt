@@ -1,0 +1,8 @@
+Task API {{ include "taskapi.imageTag" . }} is installed as release "{{ .Release.Name }}" in namespace "{{ .Release.Namespace }}".
+
+Check it:
+  kubectl -n {{ .Release.Namespace }} get pods
+  helm test {{ .Release.Name }} -n {{ .Release.Namespace }}
+{{- if .Values.httpRoute.enabled }}
+  curl http://{{ .Values.httpRoute.hostname }}:8090/health
+{{- end }}

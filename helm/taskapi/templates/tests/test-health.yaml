@@ -1,0 +1,37 @@
+{{- /*
+`helm test <release>` runs this pod once: it calls the Service from INSIDE the cluster and
+exits 0 if /ready answers 200 (app up AND database reachable). Uses our own image, which
+already has Python (no extra curl image needed, and it passes the "restricted" policy).
+*/ -}}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "taskapi.fullname" . }}-test-health
+  labels:
+    {{- include "taskapi.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  restartPolicy: Never
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 10001
+    seccompProfile: { type: RuntimeDefault }
+  containers:
+    - name: check
+      image: {{ include "taskapi.image" . }}
+      command:
+        - python
+        - -c
+        - |
+          import urllib.request
+          url = "http://{{ include "taskapi.fullname" . }}/ready"
+          r = urllib.request.urlopen(url, timeout=5)
+          print(url, r.status, r.read().decode())
+      securityContext:
+        readOnlyRootFilesystem: true
+        {{- include "taskapi.containerSecurity" . | nindent 8 }}
+      resources:
+        requests: { cpu: 10m, memory: 32Mi }
+        limits: { memory: 64Mi }

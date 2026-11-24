@@ -1,0 +1,34 @@
+# =============================================================================
+# kind cluster: 1 control-plane + 2 workers, all running as Docker containers.
+#
+#   kind create cluster --config k8s/kind-cluster.yaml
+#   kind delete cluster --name devops-lab
+#
+# Each "node" below becomes one Docker container that runs a full Kubernetes node
+# (kubelet + containerd). Pods run INSIDE those containers.
+# =============================================================================
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: devops-lab
+
+nodes:
+  # The control plane runs the "brain": API server, scheduler, controller-manager, etcd.
+  - role: control-plane
+    # Pinned by digest (same idea as our Dockerfile base image): the exact Kubernetes
+    # version kind v0.33.0 was built and tested with.
+    image: kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5
+    # Open a door from your laptop into the cluster (8090, because 8080 was already taken
+    # by another program on this laptop: see "Real error" in Step 3.2 of the guide):
+    #   laptop localhost:8090  →  this node's port 30080 (a NodePort)
+    # Envoy Gateway (Step 3.7) listens on NodePort 30080, so
+    #   http://taskapi.localhost:8090  reaches our API.
+    extraPortMappings:
+      - containerPort: 30080
+        hostPort: 8090
+        listenAddress: "127.0.0.1"   # only reachable from this laptop, not from your network
+        protocol: TCP
+  # Workers run the application pods.
+  - role: worker
+    image: kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5
+  - role: worker
+    image: kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5

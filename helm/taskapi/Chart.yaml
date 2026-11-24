@@ -1,0 +1,8 @@
+apiVersion: v2
+name: taskapi
+description: Task API (FastAPI + PostgreSQL), packaged for Kubernetes. Built in Phase 3 of devops-project.
+type: application
+# version    = the CHART's version (bump it when the templates change)
+# appVersion = the APP's version deployed by default (our image tag, set by CI later)
+version: 0.1.0
+appVersion: "sha-2273a31"

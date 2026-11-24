@@ -1,0 +1,35 @@
+# HorizontalPodAutoscaler: add/remove API pods automatically based on CPU usage.
+# Requires metrics-server (Step 3.8 G), which collects CPU/memory from every node's kubelet.
+#
+# How the math works: utilization = actual CPU / the pod's CPU *request* (100m in 40-api.yaml).
+#   desired replicas = ceil( current replicas × current utilization / target utilization )
+#   e.g. 2 pods at 150% with a 50% target → ceil(2 × 150 / 50) = 6 pods
+#
+# ⚠️ Once an HPA manages a Deployment, "replicas:" in 40-api.yaml fights with it: every
+# `kubectl apply` would reset the count to 2. The Helm chart (Step 3.9) leaves replicas
+# out when autoscaling is on.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: taskapi
+  namespace: taskapi
+  labels:
+    app.kubernetes.io/name: taskapi
+    app.kubernetes.io/part-of: taskapi
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: taskapi
+  minReplicas: 2
+  maxReplicas: 6
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 50     # aim for each pod using 50% of its 100m request
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 60  # wait 60 s of low load before removing pods (default 300)
