@@ -56,13 +56,20 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PATH="/opt/venv/bin:$PATH"
 
+# Docker CACHES this RUN layer: once built, "apt-get upgrade" is NOT run again on later
+# builds (locally, and in CI via the GitHub Actions cache), so new Debian fixes never
+# arrive. Changing this date changes the layer → cache miss → fresh security updates.
+# Bump it whenever Trivy reports a fixable OS-package CVE (2026-11-25: libzstd1).
+ARG SECURITY_UPDATES_DATE=2026-11-25
+
 # 1) Security updates: install Debian fixes released after the base image was built
-#    (Trivy found a fixable HIGH CVE in zlib1g). Clean apt lists in the SAME layer.
+#    (Trivy found fixable HIGH CVEs in zlib1g, then libzstd1). Clean apt lists in the SAME layer.
 # 2) Remove the base image's pip: not needed to run the app, and it carries
 #    vendored libraries with known CVEs.
 # 3) Dedicated unprivileged user. A fixed UID (10001) lets Kubernetes enforce
 #    "runAsNonRoot" and makes file permissions predictable.
-RUN apt-get update \
+RUN echo "Debian security updates as of ${SECURITY_UPDATES_DATE}" \
+ && apt-get update \
  && apt-get upgrade -y --no-install-recommends \
  && rm -rf /var/lib/apt/lists/* \
  && /usr/local/bin/python -m pip uninstall -y pip \
