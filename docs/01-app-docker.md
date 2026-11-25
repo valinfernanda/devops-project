@@ -984,6 +984,125 @@ curl -s localhost:8000/tasks/999 # → {"detail":"task not found"}  [HTTP 404]
 | `-d '{...}'` | request body |
 | `-w "%{http_code}"` | print the HTTP status code |
 
+### 📚 Concept: what is a smoke test?
+The block above is a **smoke test**: a short list of quick checks you run right after
+`docker compose up` to answer one question: "is the stack basically working?" (The name comes from
+hardware: switch it on and see if smoke comes out.) It isn't a full test suite. It just checks each
+layer, from the bottom up:
+
+| # | Check | Layer it proves |
+|---|---|---|
+| 1 | `alembic current` → `0001 (head)` | The database exists and its **schema** matches the code |
+| 2 | `/health` → 200 | The **API process** is alive |
+| 3 | `/ready` → 200 | The **API can talk to the database** |
+| 4 | `POST` + `PATCH` work | The **happy path**: data really goes in and comes back out of Postgres |
+| 5 | Bad input → 422, missing task → 404 | The **failure paths**: the API fails *politely* |
+
+Beginners often skip number 5. A good API doesn't only work when everything is right. It also
+fails with the **correct status code** and a **clear message** when something is wrong.
+
+### 🔍 Each command explained
+
+#### 1. `docker compose run --rm --no-deps migrate alembic current`
+
+| Part | Meaning |
+|---|---|
+| `docker compose run` | Run **one command, once**, in a service's container. Different from `up`, which starts the service and keeps it running. |
+| `--rm` | Delete the container as soon as the command finishes, so no leftover "Exited" containers pile up. |
+| `--no-deps` | Don't also start the services it `depends_on` (`db`). The db is already running. |
+| `migrate` | The service name from `compose.yaml`. It uses the same image as the API, which includes Alembic. |
+| `alembic current` | The command to run. It **replaces** the service's default command (`alembic upgrade head`). It asks: "which migration revision is the database at?" |
+
+📤 `0001 (head)` means:
+- `0001` is the migration that has been applied to the DB (a file in `app/migrations/versions/`).
+- `(head)` means that revision is the **newest** one. No migrations are waiting, so the DB schema
+  matches the code.
+
+> If you see a revision **without** `(head)`, some migrations haven't been applied yet, and the API
+> may crash with "table/column does not exist". Fix: `docker compose run --rm migrate`.
+
+#### 2. `curl -s localhost:8000/health` and `/ready`
+
+- `/health` → `{"status":"ok","version":"dev"}`: the process is alive. It **never** touches the
+  database. `"version":"dev"` is the default from [`config.py`](../app/taskapi/config.py)
+  (`version: str = "dev"`). Later, CI/CD can set `APP_VERSION` to a git SHA or tag, so you can see
+  *which build* is actually running.
+- `/ready` → `{"status":"ready"}` with HTTP **200**: the API ran a query against Postgres and it
+  worked. If the DB were down, you'd get HTTP **503** and `"database unreachable"`.
+
+Why these are two separate endpoints is explained in
+[Concept: liveness vs readiness](#-concept-liveness-vs-readiness-very-important-for-kubernetes)
+(Step 1.3), and proven in Step 1.12.
+
+#### 3. `POST /tasks`: create a task
+
+```bash
+curl -s -X POST localhost:8000/tasks -H "Content-Type: application/json" -d '{"title":"Learn Docker"}'
+```
+- `-X POST` means "create something new". `-H ...` tells the server the body is JSON. `-d` is the body.
+- We sent **only** `title`. The server filled in the rest:
+  - `id: 1`: auto-increment from Postgres
+  - `done: false`: the default value
+  - `created_at`: set **by the database** (`server_default=func.now()` in
+    [`models.py`](../app/taskapi/models.py)). The `Z` at the end means UTC.
+- The status code is **201 Created**, not 200. You can see it in the logs below. 201 is the correct
+  code when something new was created.
+- This proves the full round trip **API → Postgres → API**: the row really exists in the database.
+
+#### 4. `PATCH /tasks/1`: partial update
+
+```bash
+curl -s -X PATCH localhost:8000/tasks/1 -H "Content-Type: application/json" -d '{"done":true}'
+```
+- **PATCH** = update **only the fields you send**. We sent `done`, so `title` stays the same.
+- Compare with **PUT**, which conventionally replaces the *whole* object (you'd have to send every
+  field).
+- What makes this possible: in [`schemas.py`](../app/taskapi/schemas.py) every field of the update
+  schema is optional (`default=None`). The code only changes the fields that were actually sent.
+
+#### 5. Empty title → **422** (on purpose)
+
+```bash
+curl -s -X POST localhost:8000/tasks -H "Content-Type: application/json" -d '{"title":""}'
+```
+We **deliberately send bad data** to prove validation works.
+- The rule lives in [`schemas.py`](../app/taskapi/schemas.py): `Field(min_length=1, max_length=200)`.
+- **Pydantic** (which FastAPI uses) rejects the request **before** your endpoint code runs and
+  before anything touches the database.
+- **422 Unprocessable Entity** = "your JSON is valid, but its content breaks the rules".
+  (Broken JSON syntax would also be a 422 in FastAPI, with a different `type`.)
+- `"loc":["body","title"]` says **where** the problem is: in the request body, field `title`.
+  `"type":"string_too_short"` says **what** is wrong. This makes the API easy to debug for whoever
+  calls it.
+
+#### 6. Missing task → **404**
+
+```bash
+curl -s localhost:8000/tasks/999
+```
+- No task has id 999. The code checks for this and raises `HTTPException(status_code=404, detail="task not found")`
+  ([`main.py`](../app/taskapi/main.py)).
+- Without that check, the API might return `null` with a 200 (confusing: "success, but nothing?")
+  or crash with a 500 (looks like *our* bug, not the caller's mistake).
+
+### 📚 Status codes used in this step
+
+| Code | Name | Meaning | Whose fault? |
+|---|---|---|---|
+| 200 | OK | Request worked | – |
+| 201 | Created | Request worked **and** created something new | – |
+| 404 | Not Found | The thing you asked for doesn't exist | Caller (4xx) |
+| 422 | Unprocessable Entity | Input breaks the validation rules | Caller (4xx) |
+| 503 | Service Unavailable | Server is up but can't serve right now (DB down) | Server (5xx) |
+
+Rule of thumb: **4xx = the client sent something wrong**, **5xx = the server has a problem**.
+Monitoring (Phase 7) usually alerts on 5xx, not 4xx.
+
+> 💡 **Windows/PowerShell note:** these commands are written for bash (Ubuntu/WSL or Git Bash). In
+> PowerShell, `curl` may be an alias for `Invoke-WebRequest`, and the quotes inside the JSON often
+> get mangled. If you must use PowerShell, call `curl.exe` and escape the inner quotes:
+> `curl.exe -s -X POST localhost:8000/tasks -H "Content-Type: application/json" -d '{\"title\":\"Learn Docker\"}'`
+
 ### Logs: one stream, written to stdout
 
 ```bash
