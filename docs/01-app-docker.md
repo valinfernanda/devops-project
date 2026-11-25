@@ -523,6 +523,251 @@ sequenceDiagram
 | `test-db` → `tmpfs` | Test database stored **in RAM**: fast and wiped automatically |
 | `tests` / `test-db` → `profiles: ["test"]` | **Not** started by `up`; only when you run them explicitly |
 
+### 🔍 The tricky rows, explained in depth
+
+The table above is dense. This section unpacks the rows that are hardest to understand the first time.
+
+> 📝 `compose.yaml` is **YAML**, not a programming language: no `import`, no `if`, no logic. It is a settings file
+> with four rules: `key: value`; indentation = "belongs to the line above"; `-` = an item in a list; `#` = comment.
+
+#### Order: the file is NOT read top to bottom
+
+Compose does **not** start services in the order they are written. The order comes only from `depends_on`:
+
+| Service | `depends_on` | Starts when |
+|---|---|---|
+| `db` | none | immediately |
+| `migrate` | `db: service_healthy` | `db` is **healthy** |
+| `api` | `db: service_healthy` + `migrate: service_completed_successfully` | `db` is healthy **and** `migrate` exited with code 0 |
+
+You could write `api` first and `db` last: the result is identical. Remove every `depends_on` and all three start
+**at the same time**, and `migrate`/`api` crash because the database isn't ready yet.
+
+#### `x-app-env: &app-env`: write once, reuse twice
+
+Both `migrate` and `api` need the same database connection settings. Built up step by step:
+
+1. **Plain version.** Each service gets an `environment:` block: variables handed to the container at start,
+   which the app inside reads.
+   ```yaml
+   api:
+     environment:
+       APP_DATABASE_URL: postgresql+psycopg://taskapi:secret@db:5432/taskapi
+       APP_LOG_LEVEL: info
+   ```
+2. **The problem.** `migrate` needs exactly the same lines. Copy-pasting means two places to update, and forgetting
+   one is a bug.
+3. **The fix: a YAML anchor.** Write the block once at the top and give it a name; reuse it by name.
+   ```yaml
+   x-app-env: &app-env          # & = give this block the name "app-env"
+     APP_DATABASE_URL: ...
+     APP_LOG_LEVEL: info
+
+   services:
+     migrate:
+       environment: *app-env    # * = paste the block named "app-env" here
+     api:
+       environment:
+         <<: *app-env           # <<: = merge the block in...
+         APP_VERSION: dev       # ...and add one more key
+   ```
+   The `x-` prefix tells Compose "this is not a service, ignore it". It is only a place to keep the block.
+4. **No password in the file.** `compose.yaml` is in Git, so the password is replaced by `${POSTGRES_PASSWORD}`
+   and the real value lives in `.env` (see the next part).
+
+**Who reads `APP_DATABASE_URL`?** The Python app, in a different file:
+[`app/taskapi/config.py`](../app/taskapi/config.py). There, `Settings(BaseSettings)` with `env_prefix="APP_"`
+maps `APP_DATABASE_URL` → `database_url`, `APP_LOG_LEVEL` → `log_level`, `APP_VERSION` → `version`. The developer
+decides the variable **names**; whoever runs the app (Compose here, Kubernetes later) supplies the **values**.
+
+**Anatomy of the URL:**
+
+```
+postgresql+psycopg :// taskapi : secret @ db   : 5432 / taskapi
+└ database + driver ┘   └ user ┘ └ pass ┘ └host┘ └port┘ └db name┘
+```
+
+`db` is the **service name**: Compose's internal DNS resolves it to the database container.
+
+#### `${...}`: how values come from `.env`
+
+When you run any `docker compose` command, Compose automatically reads a file named exactly `.env` in the
+project folder (format: `NAME=value`, one per line), then does a **find-and-replace** of every `${NAME}` in
+`compose.yaml`, **before** any container is created. No code is involved: it's built into Compose.
+
+| Syntax | If `NAME` is missing or empty in `.env` |
+|---|---|
+| `${NAME}` | becomes an empty string (with a warning) |
+| `${NAME:-taskapi}` | `:-` = "use the default": becomes `taskapi` |
+| `${NAME:?message}` | `:?` = "complain": Compose **stops** and prints `message` |
+
+The `-` in `:-` is **not** a minus sign: `:-` is one operator, inherited from the bash shell. Memory aid:
+`:-` = fall back to a default, `:?` = "where is the value?".
+
+Don't confuse the two "env" things:
+
+| | Where | Role |
+|---|---|---|
+| `.env` | separate file next to `compose.yaml` | **source** of values for `${...}` (read by Compose) |
+| `environment:` | section inside `compose.yaml` | variables **given to the container** |
+
+```
+.env                        compose.yaml                          container db
+POSTGRES_USER=taskapi  →   environment:                      →   has the variable
+                             POSTGRES_USER: ${POSTGRES_USER}       POSTGRES_USER=taskapi
+```
+
+See the result of the replacement yourself: `docker compose config` (⚠️ prints the password).
+
+#### `db` → `volumes: db-data:/var/lib/postgresql/data`
+
+Format: `<volume name> : <folder inside the container>`.
+
+| Side | Who decides | Notes |
+|---|---|---|
+| Left `db-data` | **you** | any name, but it must match the `volumes:` list at the bottom of the file |
+| Right `/var/lib/postgresql/data` | **the image** | where the postgres image stores its data (`PGDATA` in its Docker Hub docs) |
+
+- The volume is **created automatically** on the first `up`. Real name: `devops-lab_db-data` (`docker volume ls`).
+- It survives `down`; only `down -v` deletes it.
+- ⚠️ A wrong right-hand path starts **without any error**, but Postgres keeps writing to its real folder, so the
+  volume stays empty and data disappears with the container.
+- Every image has its own data folder: `mysql` → `/var/lib/mysql`, `mongo` → `/data/db`, `redis` → `/data`.
+  Postgres **18+** changed its path; check the docs when upgrading.
+
+#### `db` → no `ports:`
+
+There is no line saying "no". The `db` service simply has **no `ports:` key**; the comment in the file is only
+there to say "this is on purpose". When a setting is not written, Compose uses its default, and the default for
+`ports` is "no door from your laptop".
+
+```
+┌──────────────────────────── YOUR LAPTOP ────────────────────────────┐
+│   browser, terminal, DBeaver...                                     │
+│         │ localhost:8000 (api has ports: "8000:8000")               │
+│         ▼                                                           │
+│   ┌──────────── Docker network: devops-lab_default ──────────────┐  │
+│   │   api ──── db:5432 ───► db ◄──── migrate                     │  │
+│   └──────────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+| From | Address | Works? |
+|---|---|---|
+| `api`, `migrate` (same Docker network) | `db:5432` | ✅ |
+| your laptop | `localhost:5432` | ❌ no door |
+
+- **Exposed** = given a door from your laptop via `ports:`. **Stack** = all services of this compose file.
+- **Least privilege** = give every party only the access it really needs. Only `api` and `migrate` need the
+  database; users go through the API. Fewer open doors = less to attack. Production databases follow the same rule.
+- Prove it: `nc -zv localhost 5432` fails, `nc -zv localhost 8000` succeeds (while the stack runs).
+- Need to look inside the DB? Without opening a port: `docker compose exec db psql -U taskapi -d taskapi`
+  (`\dt` lists tables, `\q` quits). If you really need a port in development, use `"127.0.0.1:5432:5432"` so only
+  your own machine can reach it.
+
+#### `db` → `healthcheck` and `$$`
+
+**Why a healthcheck?** A container that is *running* is not necessarily *ready*: Postgres needs a few seconds to
+initialise. The healthcheck is a command Docker runs **inside the container, over and over**, to ask "ready yet?".
+
+```yaml
+healthcheck:
+  test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+  interval: 5s     # run the check every 5 seconds
+  timeout: 3s      # a check that takes longer than 3 s counts as failed
+  retries: 10      # 10 failures IN A ROW → status "unhealthy"
+```
+
+| Part | Meaning |
+|---|---|
+| `CMD-SHELL` | run the command through a shell (`sh`), so `${...}` inside it can be filled in |
+| `pg_isready` | Postgres' own tool: exit code 0 = accepting connections, anything else = not yet |
+| `-U` / `-d` | user and database to check |
+
+Status goes `starting` → `healthy` (or `unhealthy`). See it in the `STATUS` column of `docker compose ps`.
+
+**`$$` = a literal `$`.** Two different programs understand `${...}`, and the number of `$` decides which one
+fills it in:
+
+| You write | Who fills it in | With which value |
+|---|---|---|
+| `${POSTGRES_USER}` | **Compose**, on your laptop, when reading the file | from `.env` |
+| `$${POSTGRES_USER}` | Compose **skips it** (only turns `$$` into `$`); the **shell inside the container** fills it in later | the container's own variable (from its `environment:`) |
+
+```
+compose.yaml:          pg_isready -U $${POSTGRES_USER}
+   Compose: "$$ is not for me" → turns $$ into $, leaves the name alone
+container receives:    pg_isready -U ${POSTGRES_USER}
+   shell inside the container fills it in from the container's variables
+actually runs:         pg_isready -U taskapi
+```
+
+Why bother? If `.env` has no `POSTGRES_USER` line, the container still gets `taskapi` (from the default in
+`environment:`), but a single `$` would make Compose insert an **empty** string → `pg_isready -U ` → wrong check.
+With `$$`, the check always uses the user Postgres was really created with.
+
+Then the jobs are split: the **shell** fills in the variables and starts the command, **`pg_isready`** does the
+actual check, and **Docker** records healthy / not healthy from the exit code.
+
+Prove it: `docker inspect devops-lab-db-1 --format '{{json .Config.Healthcheck.Test}}'` shows the command stored in
+the container still with a single `$` and the name **not yet** replaced.
+
+> ⚠️ Don't confuse `$$` with `$1`: in a shell, `$1` means "the first argument of a script", something else entirely.
+
+#### `migrate` → `restart: "no"`
+
+Two kinds of containers live in this stack:
+
+| Kind | Examples | Behaviour |
+|---|---|---|
+| long-running service | `db`, `api` | a server: waits for requests forever, never "finishes" |
+| one-off task | `migrate` | does one job (`alembic upgrade head` = create/update the tables), then **exits** |
+
+`restart:` decides what Docker does when a container stops:
+
+| Value | Behaviour |
+|---|---|
+| `"no"` | never restart: right for a one-off task |
+| `always` | always restart, even after you stopped it yourself (once Docker restarts) |
+| `on-failure` | restart only if it exited with an error |
+| `unless-stopped` | restart after crashes or Docker restarts, unless **you** stopped it: right for `db` and `api` |
+
+With `unless-stopped`, `migrate` would finish, Docker would restart it, it would finish again... forever. And `api`
+waits for `service_completed_successfully`, which needs `migrate` to really finish.
+
+- The quotes matter: in YAML a bare `no` is the boolean `false`. Compose expects the text `"no"`.
+- `docker compose ps -a` shows `migrate` as `Exited (0)`: that's **success**, not a crash.
+
+**Like a Kubernetes Job.** Phase 3 runs the same command as a real Job:
+[`k8s/manifests/30-migrate-job.yaml`](../k8s/manifests/30-migrate-job.yaml).
+
+| Compose `migrate` | Kubernetes Job |
+|---|---|
+| normal service + `restart: "no"` | `kind: Job`: a resource made for "run once until it succeeds" |
+| `restart: "no"` | `restartPolicy: Never` |
+| `depends_on: db: service_healthy` | `initContainers: wait-for-db` looping on `pg_isready` |
+| fails once = failed | `backoffLimit: 4` = retried up to 4 times first |
+| `api` waits for `service_completed_successfully` | Helm runs the Job as a hook before the app is deployed |
+
+#### `test-db` → `tmpfs`
+
+`tmpfs` (**temporary file system**) = the folder is stored in **RAM** instead of on disk. So yes: the test
+database is "in memory".
+
+| | `db` | `test-db` |
+|---|---|---|
+| data folder | `/var/lib/postgresql/data` | the same folder |
+| stored in | volume (disk) | tmpfs (RAM) |
+| speed | normal | faster |
+| container removed | data **kept** | data **gone** |
+
+Postgres itself is unchanged: it still thinks it writes files to disk; only the folder underneath is in RAM. That
+fits tests perfectly: fast, every run starts from an empty database, and nothing is left behind. Don't use it for
+large data, because it consumes RAM.
+
+Prove it (while `test-db` runs): `docker compose exec test-db df -h /var/lib/postgresql/data` shows `tmpfs` in the
+`Filesystem` column; the same command on `db` does not.
+
 ### Secrets: `.env` vs `.env.example`
 
 | File | In Git? | Content |
@@ -559,6 +804,152 @@ migrate   Exited (0)
 
 `migrate` **Exited (0)** is the success state: exit code 0 = "finished without errors".
 
+### 🔍 Each command explained, line by line
+
+> These are **Linux shell (bash)** commands. Run them in the Ubuntu terminal, **not** in Windows PowerShell:
+> `sed`, `$( ... )` and `&&` do not work in Windows PowerShell 5.1.
+
+Two shell building blocks appear in several lines, so learn them first:
+
+| Syntax | Meaning | Example |
+|---|---|---|
+| `A && B` | Run `B` **only if `A` succeeded** (exit code 0) | `config --quiet && echo valid` prints `valid` only when the file is OK |
+| `$( ... )` | **Command substitution**: run the command inside first, then paste its output here | `$(openssl rand -hex 16)` becomes a random 32-character string |
+| `# ...` | Comment: ignored by the shell | `# once` |
+
+#### 1. `cp .env.example .env`: create your secrets file
+
+| Part | Meaning |
+|---|---|
+| `cp` | **copy** a file |
+| `.env.example` | source: the template that **is** in Git |
+| `.env` | destination: your private copy that is **not** in Git |
+
+`# once` = do this a single time. ⚠️ Running it again **overwrites** your `.env` with the template, and your
+password is lost. If the database volume already exists, the stack then fails to log in (see the tip under step 5).
+
+#### 2. `sed -i "s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=$(openssl rand -hex 16)/" .env`: set a random password
+
+Read it from the inside out:
+
+**a) `$(openssl rand -hex 16)` runs first.**
+`openssl rand -hex 16` generates 16 random bytes and prints them as 32 hex characters
+(`0-9` and `a-f`), different every time. `$( ... )` pastes that result into the command.
+
+**b) `sed` then does a find-and-replace inside `.env`.**
+
+| Part | Meaning |
+|---|---|
+| `sed` | **s**tream **ed**itor: edits text from the command line, like "Find & Replace" |
+| `-i` | **in-place**: change the file itself (without it, `sed` only prints the result) |
+| `"s/FIND/REPLACE/"` | the `s` (substitute) command: `s` + `/` + what to find + `/` + replacement + `/` |
+| `.env` | the file to edit |
+
+**c) The FIND part is a pattern (regular expression): `^POSTGRES_PASSWORD=.*`**
+
+| Piece | Meaning |
+|---|---|
+| `^` | start of the line |
+| `POSTGRES_PASSWORD=` | this exact text |
+| `.*` | `.` = any character, `*` = repeated any number of times → "everything until the end of the line" |
+
+Together: *"the whole line that starts with `POSTGRES_PASSWORD=`, whatever its current value is"*.
+
+**Result:**
+
+```
+before:  POSTGRES_PASSWORD=change-me-to-something-long
+after:   POSTGRES_PASSWORD=<32 random hex characters>
+```
+
+> ⚠️ Lesson learned: a first version of this page showed a **realistic** random value here as the example. The
+> CI secret scan (**gitleaks**, rule `generic-api-key`) failed the pull request: `PASSWORD=` followed by a
+> long, random-looking string is exactly what a leaked secret looks like, and gitleaks can't know it was fake.
+> In docs, write placeholders like `<32 random hex characters>` instead of realistic fake secrets.
+
+Why not type a password by hand? You can, but a random one from the computer is stronger than one a human
+invents, and you never need to remember it: it lives in `.env`.
+
+#### 3. `git check-ignore -q .env && echo "ignored by git: OK"`: prove `.env` can't be committed
+
+| Part | Meaning |
+|---|---|
+| `git check-ignore .env` | ask Git: "does a rule in `.gitignore` ignore this file?" Success = yes, failure = no |
+| `-q` | **quiet**: print nothing, only return success or failure |
+| `&& echo "ignored by git: OK"` | print the message **only if** the file is ignored |
+
+| What you see | Meaning |
+|---|---|
+| `ignored by git: OK` | ✅ `.env` is in `.gitignore`, so `git add .` will never pick it up |
+| **nothing at all** | ❌ danger: `.env` is **not** ignored. Add `.env` to `.gitignore` before any commit |
+
+#### 4. `docker compose config --quiet && echo valid`: validate before starting anything
+
+| Part | Meaning |
+|---|---|
+| `docker compose config` | read `compose.yaml`, fill in every `${...}` from `.env`, and check the result |
+| `--quiet` | don't print the resolved file, only check it |
+| `&& echo valid` | print `valid` only if there was no problem |
+
+If something is wrong (bad YAML indentation, or `POSTGRES_PASSWORD` missing so the `:?` rule fires) you get an
+**error message** instead of `valid`. Nothing has been started yet, so this is a cheap, safe check.
+
+💡 Without `--quiet`, `docker compose config` prints the **final** file with all variables filled in. Useful to
+see what Compose really uses. It shows your password in clear text, so don't paste that output anywhere.
+
+#### 5. `docker compose up -d --build`: build and start the stack
+
+| Part | Meaning |
+|---|---|
+| `up` | create and start every service **except** those with `profiles:` (`test-db`, `tests`) |
+| `-d` | **detached**: run in the background and give the terminal back. Logs are not streamed to your screen |
+| `--build` | **rebuild** the images from `./app` first. Needed after code changes; without it Compose reuses the old image |
+
+What happens, in order: build image → start `db` → wait for **healthy** → run `migrate` → wait for
+**exit code 0** → start `api` (see the [startup order diagram](#startup-order) above).
+
+💡 Run it **without** `-d` once (`docker compose up --build`) to watch every container's logs live and see the
+order with your own eyes. `Ctrl+C` stops everything.
+
+💡 Postgres only reads `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` the **first time**, when the
+`db-data` volume is empty. Changing the password in `.env` later does **not** change it inside the database:
+`migrate` and `api` then fail with "password authentication failed". In local development the easy fix is
+`docker compose down -v` (⚠️ deletes all data) and `up` again.
+
+#### 6. `docker compose ps -a`: check the result
+
+| Part | Meaning |
+|---|---|
+| `ps` | list the containers of this project and their status |
+| `-a` | **all**: include containers that already **stopped** |
+
+`-a` matters because `migrate` has already finished. Without `-a` it is not listed, and you can't tell whether it
+succeeded.
+
+| Service | Expected status | Meaning |
+|---|---|---|
+| `db` | `Up ... (healthy)` | running, and `pg_isready` succeeds ✅ |
+| `migrate` | `Exited (0)` | finished successfully: this is **normal**, not a crash ✅ |
+| `api` | `Up ... (health: starting)` → `(healthy)` | running; becomes healthy after its first `/health` checks ✅ |
+
+If `migrate` shows `Exited (1)` (or any number other than 0), the migration **failed** and `api` will never
+start. Read why with:
+
+```bash
+docker compose logs migrate
+```
+
+#### Summary
+
+| # | Command | Purpose | How often |
+|---|---|---|---|
+| 1 | `cp .env.example .env` | create your private `.env` | once |
+| 2 | `sed ... openssl rand ...` | put a random password in it | once |
+| 3 | `git check-ignore -q .env` | prove `.env` will never be committed | once |
+| 4 | `docker compose config --quiet` | validate the file and variables | every time you edit `compose.yaml` / `.env` |
+| 5 | `docker compose up -d --build` | build and start the stack | every time you start working / change code |
+| 6 | `docker compose ps -a` | check every container's status | after every `up` |
+
 ---
 
 ## Step 1.11: Run and verify the API ✅
@@ -592,6 +983,125 @@ curl -s localhost:8000/tasks/999 # → {"detail":"task not found"}  [HTTP 404]
 | `-H "Content-Type: application/json"` | tell the API the body is JSON |
 | `-d '{...}'` | request body |
 | `-w "%{http_code}"` | print the HTTP status code |
+
+### 📚 Concept: what is a smoke test?
+The block above is a **smoke test**: a short list of quick checks you run right after
+`docker compose up` to answer one question: "is the stack basically working?" (The name comes from
+hardware: switch it on and see if smoke comes out.) It isn't a full test suite. It just checks each
+layer, from the bottom up:
+
+| # | Check | Layer it proves |
+|---|---|---|
+| 1 | `alembic current` → `0001 (head)` | The database exists and its **schema** matches the code |
+| 2 | `/health` → 200 | The **API process** is alive |
+| 3 | `/ready` → 200 | The **API can talk to the database** |
+| 4 | `POST` + `PATCH` work | The **happy path**: data really goes in and comes back out of Postgres |
+| 5 | Bad input → 422, missing task → 404 | The **failure paths**: the API fails *politely* |
+
+Beginners often skip number 5. A good API doesn't only work when everything is right. It also
+fails with the **correct status code** and a **clear message** when something is wrong.
+
+### 🔍 Each command explained
+
+#### 1. `docker compose run --rm --no-deps migrate alembic current`
+
+| Part | Meaning |
+|---|---|
+| `docker compose run` | Run **one command, once**, in a service's container. Different from `up`, which starts the service and keeps it running. |
+| `--rm` | Delete the container as soon as the command finishes, so no leftover "Exited" containers pile up. |
+| `--no-deps` | Don't also start the services it `depends_on` (`db`). The db is already running. |
+| `migrate` | The service name from `compose.yaml`. It uses the same image as the API, which includes Alembic. |
+| `alembic current` | The command to run. It **replaces** the service's default command (`alembic upgrade head`). It asks: "which migration revision is the database at?" |
+
+📤 `0001 (head)` means:
+- `0001` is the migration that has been applied to the DB (a file in `app/migrations/versions/`).
+- `(head)` means that revision is the **newest** one. No migrations are waiting, so the DB schema
+  matches the code.
+
+> If you see a revision **without** `(head)`, some migrations haven't been applied yet, and the API
+> may crash with "table/column does not exist". Fix: `docker compose run --rm migrate`.
+
+#### 2. `curl -s localhost:8000/health` and `/ready`
+
+- `/health` → `{"status":"ok","version":"dev"}`: the process is alive. It **never** touches the
+  database. `"version":"dev"` is the default from [`config.py`](../app/taskapi/config.py)
+  (`version: str = "dev"`). Later, CI/CD can set `APP_VERSION` to a git SHA or tag, so you can see
+  *which build* is actually running.
+- `/ready` → `{"status":"ready"}` with HTTP **200**: the API ran a query against Postgres and it
+  worked. If the DB were down, you'd get HTTP **503** and `"database unreachable"`.
+
+Why these are two separate endpoints is explained in
+[Concept: liveness vs readiness](#-concept-liveness-vs-readiness-very-important-for-kubernetes)
+(Step 1.3), and proven in Step 1.12.
+
+#### 3. `POST /tasks`: create a task
+
+```bash
+curl -s -X POST localhost:8000/tasks -H "Content-Type: application/json" -d '{"title":"Learn Docker"}'
+```
+- `-X POST` means "create something new". `-H ...` tells the server the body is JSON. `-d` is the body.
+- We sent **only** `title`. The server filled in the rest:
+  - `id: 1`: auto-increment from Postgres
+  - `done: false`: the default value
+  - `created_at`: set **by the database** (`server_default=func.now()` in
+    [`models.py`](../app/taskapi/models.py)). The `Z` at the end means UTC.
+- The status code is **201 Created**, not 200. You can see it in the logs below. 201 is the correct
+  code when something new was created.
+- This proves the full round trip **API → Postgres → API**: the row really exists in the database.
+
+#### 4. `PATCH /tasks/1`: partial update
+
+```bash
+curl -s -X PATCH localhost:8000/tasks/1 -H "Content-Type: application/json" -d '{"done":true}'
+```
+- **PATCH** = update **only the fields you send**. We sent `done`, so `title` stays the same.
+- Compare with **PUT**, which conventionally replaces the *whole* object (you'd have to send every
+  field).
+- What makes this possible: in [`schemas.py`](../app/taskapi/schemas.py) every field of the update
+  schema is optional (`default=None`). The code only changes the fields that were actually sent.
+
+#### 5. Empty title → **422** (on purpose)
+
+```bash
+curl -s -X POST localhost:8000/tasks -H "Content-Type: application/json" -d '{"title":""}'
+```
+We **deliberately send bad data** to prove validation works.
+- The rule lives in [`schemas.py`](../app/taskapi/schemas.py): `Field(min_length=1, max_length=200)`.
+- **Pydantic** (which FastAPI uses) rejects the request **before** your endpoint code runs and
+  before anything touches the database.
+- **422 Unprocessable Entity** = "your JSON is valid, but its content breaks the rules".
+  (Broken JSON syntax would also be a 422 in FastAPI, with a different `type`.)
+- `"loc":["body","title"]` says **where** the problem is: in the request body, field `title`.
+  `"type":"string_too_short"` says **what** is wrong. This makes the API easy to debug for whoever
+  calls it.
+
+#### 6. Missing task → **404**
+
+```bash
+curl -s localhost:8000/tasks/999
+```
+- No task has id 999. The code checks for this and raises `HTTPException(status_code=404, detail="task not found")`
+  ([`main.py`](../app/taskapi/main.py)).
+- Without that check, the API might return `null` with a 200 (confusing: "success, but nothing?")
+  or crash with a 500 (looks like *our* bug, not the caller's mistake).
+
+### 📚 Status codes used in this step
+
+| Code | Name | Meaning | Whose fault? |
+|---|---|---|---|
+| 200 | OK | Request worked | – |
+| 201 | Created | Request worked **and** created something new | – |
+| 404 | Not Found | The thing you asked for doesn't exist | Caller (4xx) |
+| 422 | Unprocessable Entity | Input breaks the validation rules | Caller (4xx) |
+| 503 | Service Unavailable | Server is up but can't serve right now (DB down) | Server (5xx) |
+
+Rule of thumb: **4xx = the client sent something wrong**, **5xx = the server has a problem**.
+Monitoring (Phase 7) usually alerts on 5xx, not 4xx.
+
+> 💡 **Windows/PowerShell note:** these commands are written for bash (Ubuntu/WSL or Git Bash). In
+> PowerShell, `curl` may be an alias for `Invoke-WebRequest`, and the quotes inside the JSON often
+> get mangled. If you must use PowerShell, call `curl.exe` and escape the inner quotes:
+> `curl.exe -s -X POST localhost:8000/tasks -H "Content-Type: application/json" -d '{\"title\":\"Learn Docker\"}'`
 
 ### Logs: one stream, written to stdout
 

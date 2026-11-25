@@ -25,6 +25,17 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-taskapi}
       POSTGRES_USER: ${POSTGRES_USER:-taskapi}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    # Volume line format:   <volume name> : <folder INSIDE the container>
+    #   LEFT  "db-data"                  → our own choice of name. It must match the name
+    #                                      declared under "volumes:" at the bottom of this file.
+    #   RIGHT "/var/lib/postgresql/data" → NOT our choice. This is where the postgres image
+    #                                      stores its data (see "PGDATA" in the image docs on
+    #                                      Docker Hub). Every image has its own data folder.
+    # Mistake to avoid: a wrong right-hand path still starts without errors, but Postgres keeps
+    # writing to its real folder, so the volume stays EMPTY and data is lost with the container.
+    # Note: postgres 18+ changed this path. Check the docs again when upgrading the image.
+    # The volume is created automatically on the first "docker compose up" (real name:
+    # devops-lab_db-data, see "docker volume ls"). Only "docker compose down -v" deletes it.
     volumes:
       - db-data:/var/lib/postgresql/data      # named volume: data survives container restarts
     healthcheck:
@@ -76,6 +87,8 @@ services:
       POSTGRES_DB: taskapi_test
       POSTGRES_USER: test
       POSTGRES_PASSWORD: test               # fine: this DB only lives during a test run
+    # Same data folder as the "db" service (fixed by the postgres image), but here it is
+    # mounted as tmpfs instead of a volume: there is no volume name, because nothing is kept.
     tmpfs:
       - /var/lib/postgresql/data            # stored in RAM: fast, and gone when stopped
     healthcheck:
@@ -99,5 +112,8 @@ services:
         condition: service_healthy
     profiles: ["test"]                      # NOT started by "up"; only by "run tests"
 
+# Declare every named volume used above. Without this list, "docker compose up" fails with
+# an "undefined volume" error. Compose creates missing volumes automatically, and prefixes
+# the project name: "db-data" becomes "devops-lab_db-data".
 volumes:
   db-data:
